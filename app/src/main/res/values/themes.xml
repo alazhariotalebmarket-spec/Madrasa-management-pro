@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.MyApplication" parent="android:Theme.DeviceDefault.NoActionBar">
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/madrasa_logo_round</item>
+        <item name="android:windowSplashScreenBackground">#0A3656</item>
+    </style>
+</resources>

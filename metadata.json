@@ -1,0 +1,6 @@
+{
+  "name": "মাদ্রাসা ম্যানেজমেন্ট প্রো",
+  "description": "Complete offline-first Madrasa Management Pro Android application for students, attendance, fees, reports, results, teachers, and expenses.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
