@@ -4,6 +4,8 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.MadrasaDatabase
+import com.example.data.MadrasaInfo
+import com.example.data.MadrasaInfoStore
 import com.example.data.MadrasaRepository
 import com.example.data.entity.*
 import kotlinx.coroutines.flow.*
@@ -28,6 +30,13 @@ class MadrasaViewModel(application: Application) : AndroidViewModel(application)
             db.questionPaperDao(),
             db.classRoutineDao()
         )
+    }
+
+    private val _madrasaInfo = MutableStateFlow(MadrasaInfoStore.getInfo(application))
+    val madrasaInfo: StateFlow<MadrasaInfo> = _madrasaInfo.asStateFlow()
+
+    fun updateMadrasaInfo(name: String, address: String, phone: String) {
+        _madrasaInfo.value = MadrasaInfoStore.saveInfo(getApplication(), name, address, phone)
     }
 
     val students: StateFlow<List<StudentEntity>> = repository.allStudents

@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
 import com.example.R
+import com.example.data.MadrasaInfo
 import com.example.data.entity.FeeEntity
 import com.example.data.entity.StudentEntity
 import com.example.ui.components.IslamicPatternOverlay
@@ -59,8 +60,13 @@ data class MenuOption(
 fun DashboardScreen(
     students: List<StudentEntity>,
     fees: List<FeeEntity>,
+    madrasaInfo: MadrasaInfo,
+    onUpdateMadrasaInfo: (String, String, String) -> Unit,
     onNavigate: (String) -> Unit
 ) {
+    val context = LocalContext.current
+    var showEditInfoDialog by remember { mutableStateOf(false) }
+
     val menuItems = remember {
         listOf(
             MenuOption("ভর্তি", Icons.Default.PersonAdd, "students", "menu_admission"),
@@ -80,7 +86,7 @@ fun DashboardScreen(
         )
     }
 
-    var titleFontSize by remember { mutableStateOf(15.sp) }
+    var titleFontSize by remember(madrasaInfo.name) { mutableStateOf(15.sp) }
 
     Column(
         modifier = Modifier
@@ -129,72 +135,118 @@ fun DashboardScreen(
 
                         Spacer(modifier = Modifier.width(12.dp))
 
-                        // Right: Madrasa Title (1 line white), Address (sky blue), Mobile (white) + Backup pill
+                        // Right: Editable Madrasa Title, Address, Mobile + Edit & Backup pills
                         Column(
                             modifier = Modifier.weight(1f),
                             verticalArrangement = Arrangement.Center
                         ) {
-                            Text(
-                                text = "ইসহাকিয়া কেরাতুল কোরআন নূরানী ও হাফেজিয়া মাদ্রাসা",
-                                color = Color.White,
-                                fontSize = titleFontSize,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1,
-                                softWrap = false,
-                                overflow = TextOverflow.Ellipsis,
-                                onTextLayout = { result ->
-                                    if (result.hasVisualOverflow && titleFontSize.value > 10.5f) {
-                                        titleFontSize = (titleFontSize.value - 0.5f).sp
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable { showEditInfoDialog = true }
+                                    .testTag("edit_madrasa_info_area")
+                            ) {
+                                Text(
+                                    text = madrasaInfo.name,
+                                    color = Color.White,
+                                    fontSize = titleFontSize,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    overflow = TextOverflow.Ellipsis,
+                                    onTextLayout = { result ->
+                                        if (result.hasVisualOverflow && titleFontSize.value > 10.5f) {
+                                            titleFontSize = (titleFontSize.value - 0.5f).sp
+                                        }
                                     }
-                                }
-                            )
-                            Spacer(modifier = Modifier.height(3.dp))
-                            Text(
-                                text = "পশ্চিম তুষখালী, ছোটবিঘাই, পটুয়াখালী",
-                                color = MadrasaSky,
-                                fontSize = 12.5.sp,
-                                fontWeight = FontWeight.Medium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
+                                )
+                                Spacer(modifier = Modifier.height(3.dp))
+                                Text(
+                                    text = madrasaInfo.address,
+                                    color = MadrasaSky,
+                                    fontSize = 12.5.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(5.dp))
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    text = "মোবাইল: +8801726541607",
+                                    text = "মোবাইল: ${madrasaInfo.phone}",
                                     color = Color.White.copy(alpha = 0.95f),
                                     fontSize = 12.sp,
-                                    fontWeight = FontWeight.SemiBold
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f, fill = false)
                                 )
-                                Surface(
-                                    shape = RoundedCornerShape(10.dp),
-                                    color = Color.White.copy(alpha = 0.16f),
-                                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.25f)),
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(10.dp))
-                                        .clickable { onNavigate("backup") }
-                                        .testTag("header_backup_button")
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Row(
-                                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
-                                        verticalAlignment = Alignment.CenterVertically
+                                    Surface(
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = MadrasaGold.copy(alpha = 0.2f),
+                                        border = BorderStroke(1.dp, MadrasaGold.copy(alpha = 0.6f)),
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .clickable { showEditInfoDialog = true }
+                                            .testTag("header_edit_info_button")
                                     ) {
-                                        Icon(
-                                            imageVector = Icons.Default.CloudUpload,
-                                            contentDescription = "ব্যাকআপ",
-                                            tint = MadrasaSky,
-                                            modifier = Modifier.size(14.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text(
-                                            text = "ব্যাকআপ",
-                                            color = Color.White,
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.SemiBold
-                                        )
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Edit,
+                                                contentDescription = "তথ্য সম্পাদনা",
+                                                tint = MadrasaGold,
+                                                modifier = Modifier.size(13.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(3.dp))
+                                            Text(
+                                                text = "এডিট",
+                                                color = Color.White,
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                        }
+                                    }
+
+                                    Surface(
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = Color.White.copy(alpha = 0.16f),
+                                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.25f)),
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .clickable { onNavigate("backup") }
+                                            .testTag("header_backup_button")
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.CloudUpload,
+                                                contentDescription = "ব্যাকআপ",
+                                                tint = MadrasaSky,
+                                                modifier = Modifier.size(13.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(3.dp))
+                                            Text(
+                                                text = "ব্যাকআপ",
+                                                color = Color.White,
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -325,6 +377,81 @@ fun DashboardScreen(
                 }
             }
         }
+    }
+
+    if (showEditInfoDialog) {
+        var nameInput by remember(madrasaInfo.name) { mutableStateOf(madrasaInfo.name) }
+        var addressInput by remember(madrasaInfo.address) { mutableStateOf(madrasaInfo.address) }
+        var phoneInput by remember(madrasaInfo.phone) { mutableStateOf(madrasaInfo.phone) }
+
+        AlertDialog(
+            onDismissRequest = { showEditInfoDialog = false },
+            title = {
+                Text(
+                    text = "মাদ্রাসার তথ্য সম্পাদনা",
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedTextField(
+                        value = nameInput,
+                        onValueChange = { nameInput = it },
+                        label = { Text("মাদ্রাসার নাম *") },
+                        singleLine = false,
+                        maxLines = 2,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("edit_madrasa_name_input"),
+                        shape = RoundedCornerShape(10.dp)
+                    )
+                    OutlinedTextField(
+                        value = addressInput,
+                        onValueChange = { addressInput = it },
+                        label = { Text("মাদ্রাসার ঠিকানা *") },
+                        singleLine = false,
+                        maxLines = 2,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("edit_madrasa_address_input"),
+                        shape = RoundedCornerShape(10.dp)
+                    )
+                    OutlinedTextField(
+                        value = phoneInput,
+                        onValueChange = { phoneInput = it },
+                        label = { Text("মোবাইল নাম্বার *") },
+                        singleLine = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("edit_madrasa_phone_input"),
+                        shape = RoundedCornerShape(10.dp)
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (nameInput.isBlank() || addressInput.isBlank() || phoneInput.isBlank()) {
+                            Toast.makeText(context, "নাম, ঠিকানা ও মোবাইল নাম্বার পূরণ করুন", Toast.LENGTH_SHORT).show()
+                            return@Button
+                        }
+                        onUpdateMadrasaInfo(nameInput, addressInput, phoneInput)
+                        Toast.makeText(context, "মাদ্রাসার তথ্য সংরক্ষণ করা হয়েছে!", Toast.LENGTH_SHORT).show()
+                        showEditInfoDialog = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MadrasaPrimary, contentColor = Color.White),
+                    modifier = Modifier.testTag("save_madrasa_info_button")
+                ) {
+                    Text("সংরক্ষণ করুন", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showEditInfoDialog = false }) {
+                    Text("বাতিল")
+                }
+            }
+        )
     }
 }
 

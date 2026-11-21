@@ -14,6 +14,7 @@ import android.text.TextPaint
 import android.widget.Toast
 import androidx.core.content.FileProvider
 import com.example.R
+import com.example.data.MadrasaInfoStore
 import com.example.data.entity.NoticeEntity
 import java.io.File
 import java.io.FileOutputStream
@@ -66,9 +67,10 @@ object NoticeImageUtil {
             color = 0xFFE2E8F0.toInt()
             textSize = 22f
         }
+        val madrasaInfo = MadrasaInfoStore.getInfo(context)
         val headerTextWidth = (width - 65f - 140f - 55f).toInt()
-        val headerTitleLayout = buildLayout(MADRASA_NAME, headerTitlePaint, headerTextWidth, spacingMult = 1.15f, spacingAdd = 4f)
-        val headerSubLayout = buildLayout(MADRASA_ADDRESS, headerSubPaint, headerTextWidth, spacingMult = 1.15f, spacingAdd = 2f)
+        val headerTitleLayout = buildLayout(madrasaInfo.name, headerTitlePaint, headerTextWidth, spacingMult = 1.15f, spacingAdd = 4f)
+        val headerSubLayout = buildLayout(madrasaInfo.address, headerSubPaint, headerTextWidth, spacingMult = 1.15f, spacingAdd = 2f)
 
         val headerContentHeight = headerTitleLayout.height + headerSubLayout.height + 46f
         val headerBottom = maxOf(230f, 64f + headerContentHeight + 24f)
@@ -170,7 +172,7 @@ object NoticeImageUtil {
             textSize = 22f
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
         }
-        canvas.drawText("মোবাইল: $MADRASA_PHONE", 208f, hy + 18f, headerPhonePaint)
+        canvas.drawText("মোবাইল: ${madrasaInfo.phone}", 208f, hy + 18f, headerPhonePaint)
 
         // 4. Gold Ribbon Bar
         canvas.drawRect(40f, headerBottom, width - 40f, ribbonBottom, Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -270,7 +272,7 @@ object NoticeImageUtil {
             textSize = 19f
             textAlign = Paint.Align.CENTER
         }
-        canvas.drawText("ইসহাকিয়া মাদ্রাসা ম্যানেজমেন্ট প্রো • $DEVELOPER_FOOTER", width / 2f, height - 51f, footerText)
+        canvas.drawText("${madrasaInfo.name} • $DEVELOPER_FOOTER", width / 2f, height - 51f, footerText)
 
         return bitmap
     }
@@ -323,13 +325,14 @@ object NoticeImageUtil {
                 Toast.LENGTH_LONG
             ).show()
 
+            val madrasaInfo = MadrasaInfoStore.getInfo(context)
             val shareIntent = Intent(Intent.ACTION_SEND).apply {
                 type = "image/png"
                 putExtra(Intent.EXTRA_STREAM, shareUri)
                 putExtra(Intent.EXTRA_SUBJECT, "মাদ্রাসা নোটিশ - ${notice.title}")
                 putExtra(
                     Intent.EXTRA_TEXT,
-                    "ইসহাকিয়া কেরাতুল কোরআন নূরানী ও হাফেজিয়া মাদ্রাসা\nনোটিশ: ${notice.title}\nতারিখ: ${notice.date}\n\n${notice.description}"
+                    "${madrasaInfo.name}\nনোটিশ: ${notice.title}\nতারিখ: ${notice.date}\n\n${notice.description}"
                 )
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }

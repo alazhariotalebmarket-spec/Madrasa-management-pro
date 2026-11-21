@@ -24,6 +24,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.R
+import com.example.data.MadrasaInfo
 import com.example.data.entity.FeeEntity
 import com.example.data.entity.StudentEntity
 import com.example.ui.components.MadrasaEmptyState
@@ -44,6 +45,7 @@ import java.util.*
 fun FeesScreen(
     students: List<StudentEntity>,
     fees: List<FeeEntity>,
+    madrasaInfo: MadrasaInfo = MadrasaInfo(),
     onAddFee: (Int, Double, String, String) -> Unit,
     onDeleteFee: (Int) -> Unit
 ) {
@@ -302,14 +304,14 @@ fun FeesScreen(
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = "ইসহাকিয়া কেরাতুল কোরআন নূরানী ও হাফেজিয়া মাদ্রাসা",
+                            text = madrasaInfo.name,
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Bold,
                             color = MadrasaPrimary,
                             textAlign = TextAlign.Center
                         )
                         Text(
-                            text = "পশ্চিম তুষখালী, ছোটবিঘাই, পটুয়াখালী সদর • +8801726541607",
+                            text = "${madrasaInfo.address} • ${madrasaInfo.phone}",
                             fontSize = 11.sp,
                             color = TextMuted,
                             textAlign = TextAlign.Center

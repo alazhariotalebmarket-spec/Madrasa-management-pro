@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.R
+import com.example.data.MadrasaInfo
 import com.example.data.entity.StudentEntity
 import com.example.data.entity.TeacherEntity
 import com.example.ui.components.MadrasaEmptyState
@@ -38,7 +39,8 @@ import com.example.util.PdfPrintUtil
 @Composable
 fun IdCardScreen(
     students: List<StudentEntity>,
-    teachers: List<TeacherEntity>
+    teachers: List<TeacherEntity>,
+    madrasaInfo: MadrasaInfo = MadrasaInfo()
 ) {
     val context = LocalContext.current
     var selectedType by remember { mutableStateOf("student") } // "student" or "teacher"
@@ -310,6 +312,7 @@ fun IdCardScreen(
     if (previewStudent != null) {
         StudentIdCardDialog(
             student = previewStudent!!,
+            madrasaInfo = madrasaInfo,
             onDismiss = { previewStudent = null }
         )
     }
@@ -317,6 +320,7 @@ fun IdCardScreen(
     if (previewTeacher != null) {
         TeacherIdCardDialog(
             teacher = previewTeacher!!,
+            madrasaInfo = madrasaInfo,
             onDismiss = { previewTeacher = null }
         )
     }
@@ -325,6 +329,7 @@ fun IdCardScreen(
 @Composable
 fun TeacherIdCardDialog(
     teacher: TeacherEntity,
+    madrasaInfo: MadrasaInfo = MadrasaInfo(),
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
@@ -389,14 +394,14 @@ fun TeacherIdCardDialog(
                             )
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                text = "ইসহাকিয়া কেরাতুল কোরআন নূরানী ও হাফেজিয়া মাদ্রাসা",
+                                text = madrasaInfo.name,
                                 fontSize = 11.5.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White,
                                 textAlign = TextAlign.Center
                             )
                             Text(
-                                text = "পশ্চিম তুষখালী, ছোটবিঘাই, পটুয়াখালী",
+                                text = madrasaInfo.address,
                                 fontSize = 9.5.sp,
                                 color = Color.White.copy(alpha = 0.85f),
                                 textAlign = TextAlign.Center

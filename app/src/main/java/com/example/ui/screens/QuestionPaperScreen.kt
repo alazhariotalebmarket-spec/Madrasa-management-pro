@@ -177,7 +177,7 @@ fun QuestionPaperScreen(
                 MadrasaEmptyState(
                     icon = Icons.Default.Description,
                     title = "কোন সংরক্ষিত প্রশ্নপত্র নেই",
-                    subtitle = "উপরের ফর্মে প্রশ্ন লিখে সেভ করুন ও A4 PDF তৈরি করুন"
+                    subtitle = "উপরের ফর্মে প্রশ্ন লিখে সেভ করুন ও ২-কপি A4 ল্যান্ডস্কেপ PDF তৈরি করুন"
                 )
             }
         } else {
@@ -230,7 +230,7 @@ fun QuestionPaperScreen(
                         ) {
                             Icon(Icons.Default.PictureAsPdf, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("A4 প্রশ্নপত্র PDF ডাউনলোড", fontWeight = FontWeight.Bold)
+                            Text("A4 ল্যান্ডস্কেপ (২ কপি) PDF ডাউনলোড", fontWeight = FontWeight.Bold)
                         }
                     }
                 }

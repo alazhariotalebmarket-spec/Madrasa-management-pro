@@ -69,6 +69,7 @@ fun MainAppScaffold(viewModel: MadrasaViewModel) {
     val notices by viewModel.notices.collectAsState()
     val questionPapers by viewModel.questionPapers.collectAsState()
     val classRoutines by viewModel.classRoutines.collectAsState()
+    val madrasaInfo by viewModel.madrasaInfo.collectAsState()
 
     val bottomTabs = remember {
         listOf(
@@ -158,10 +159,15 @@ fun MainAppScaffold(viewModel: MadrasaViewModel) {
                     "dashboard" -> DashboardScreen(
                         students = students,
                         fees = fees,
+                        madrasaInfo = madrasaInfo,
+                        onUpdateMadrasaInfo = { name, address, phone ->
+                            viewModel.updateMadrasaInfo(name, address, phone)
+                        },
                         onNavigate = { screen -> currentTab = screen }
                     )
                     "students" -> StudentsScreen(
                         students = students,
+                        madrasaInfo = madrasaInfo,
                         onAddStudent = { name, father, phone, cls, fee, photo, roll, electricBill ->
                             viewModel.addStudent(name, father, phone, cls, fee, photo, roll, electricBill)
                         },
@@ -175,6 +181,7 @@ fun MainAppScaffold(viewModel: MadrasaViewModel) {
                     "fees" -> FeesScreen(
                         students = students,
                         fees = fees,
+                        madrasaInfo = madrasaInfo,
                         onAddFee = { studentId, amount, type, month ->
                             viewModel.addFee(studentId, amount, type, month)
                         },
@@ -182,11 +189,13 @@ fun MainAppScaffold(viewModel: MadrasaViewModel) {
                     )
                     "report" -> ReportScreen(
                         students = students,
-                        fees = fees
+                        fees = fees,
+                        madrasaInfo = madrasaInfo
                     )
                     "results" -> ResultsScreen(
                         students = students,
                         results = results,
+                        madrasaInfo = madrasaInfo,
                         onSaveResult = { id, sId, exam, subjects, existingDate ->
                             viewModel.saveResult(id, sId, exam, subjects, existingDate)
                         },
@@ -228,7 +237,8 @@ fun MainAppScaffold(viewModel: MadrasaViewModel) {
                     )
                     "id_card" -> IdCardScreen(
                         students = students,
-                        teachers = teachers
+                        teachers = teachers,
+                        madrasaInfo = madrasaInfo
                     )
                     "admit_card" -> AdmitCardScreen(
                         students = students

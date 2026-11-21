@@ -19,6 +19,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.MadrasaInfo
 import com.example.data.entity.FeeEntity
 import com.example.data.entity.StudentEntity
 import com.example.ui.components.MadrasaEmptyState
@@ -30,7 +31,8 @@ import com.example.ui.theme.MadrasaRed
 @Composable
 fun ReportScreen(
     students: List<StudentEntity>,
-    fees: List<FeeEntity>
+    fees: List<FeeEntity>,
+    madrasaInfo: MadrasaInfo = MadrasaInfo()
 ) {
     val context = LocalContext.current
 
@@ -141,7 +143,7 @@ fun ReportScreen(
 
                                 Button(
                                     onClick = {
-                                        val message = "আসসালামু আলাইকুম, ইসহাকিয়া কেরাতুল কোরআন নূরানী ও হাফেজিয়া মাদ্রাসার পক্ষ থেকে জানানো যাচ্ছে যে, আপনার সন্তান ${student.name}-এর বকেয়া বেতন ${due.toInt()} টাকা বাকি রয়েছে। দয়া করে পরিশোধ করার অনুরোধ করা হলো।"
+                                        val message = "আসসালামু আলাইকুম, ${madrasaInfo.name}-এর পক্ষ থেকে জানানো যাচ্ছে যে, আপনার সন্তান ${student.name}-এর বকেয়া বেতন ${due.toInt()} টাকা বাকি রয়েছে। দয়া করে পরিশোধ করার অনুরোধ করা হলো।"
                                         val intent = Intent(Intent.ACTION_VIEW, Uri.parse("smsto:${student.phone}")).apply {
                                             putExtra("sms_body", message)
                                         }

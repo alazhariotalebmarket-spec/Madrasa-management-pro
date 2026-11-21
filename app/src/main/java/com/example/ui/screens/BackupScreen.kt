@@ -49,10 +49,15 @@ fun BackupScreen(
     val expenses by viewModel.expenses.collectAsState()
     val notices by viewModel.notices.collectAsState()
 
+    val classRoutines_unused = Unit
+    val madrasaInfo by viewModel.madrasaInfo.collectAsState()
+
     fun createBackupJson(): String {
         val root = JSONObject()
         val timeStamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
-        root.put("institution", "ইসহাকিয়া কেরাতুল কোরআন নূরানী ও হাফেজিয়া মাদ্রাসা")
+        root.put("institution", madrasaInfo.name)
+        root.put("institutionAddress", madrasaInfo.address)
+        root.put("institutionPhone", madrasaInfo.phone)
         root.put("backupDate", timeStamp)
 
         val studentsArray = JSONArray()
@@ -429,7 +434,7 @@ fun BackupScreen(
                             val shareIntent = Intent(Intent.ACTION_SEND).apply {
                                 type = "application/json"
                                 putExtra(Intent.EXTRA_STREAM, fileUri)
-                                putExtra(Intent.EXTRA_SUBJECT, "ইসহাকিয়া মাদ্রাসা - ব্যাকআপ ফাইল")
+                                putExtra(Intent.EXTRA_SUBJECT, "${madrasaInfo.name} - ব্যাকআপ ফাইল")
                                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                             }
                             context.startActivity(Intent.createChooser(shareIntent, "ব্যাকআপ ফাইল সংরক্ষণ বা শেয়ার করুন"))

@@ -15,6 +15,7 @@ import android.text.TextPaint
 import android.widget.Toast
 import androidx.core.content.FileProvider
 import com.example.R
+import com.example.data.MadrasaInfoStore
 import com.example.data.entity.*
 import java.io.File
 import java.io.FileInputStream
@@ -63,9 +64,27 @@ object PdfPrintUtil {
     private const val CR80_PDF_W_PT = 165
     private const val CR80_PDF_H_PT = 254
 
+    private val highQualityBitmapPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG or Paint.DITHER_FLAG)
+
+    private fun loadHighResMadrasaLogo(context: Context, maxPx: Int = 512): Bitmap? {
+        return try {
+            val opts = BitmapFactory.Options().apply { inScaled = false }
+            val src = BitmapFactory.decodeResource(context.resources, R.drawable.madrasa_logo_round, opts)
+                ?: return null
+            if (src.width > maxPx || src.height > maxPx) {
+                Bitmap.createScaledBitmap(src, maxPx, maxPx, true)
+            } else {
+                src
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     private fun loadMadrasaLogo(context: Context, sizePx: Int): Bitmap? {
         return try {
-            val src = BitmapFactory.decodeResource(context.resources, R.drawable.madrasa_logo_round)
+            val opts = BitmapFactory.Options().apply { inScaled = false }
+            val src = BitmapFactory.decodeResource(context.resources, R.drawable.madrasa_logo_round, opts)
             src?.let { Bitmap.createScaledBitmap(it, sizePx, sizePx, true) }
         } catch (_: Exception) {
             null
@@ -144,7 +163,8 @@ object PdfPrintUtil {
             private set
         var y = MARGIN_12MM
 
-        private val logoBmp = loadMadrasaLogo(context, 48)
+        private val logoBmp = loadHighResMadrasaLogo(context, 480)
+        private val madrasaInfo = MadrasaInfoStore.getInfo(context)
 
         init {
             startNextPage(isFirstPage = true)
@@ -211,8 +231,8 @@ object PdfPrintUtil {
                 color = 0xFFE2E8F0.toInt()
                 textSize = 10f
             }
-            val titleLayout = makeStaticLayout(MADRASA_NAME, titlePaint, headerTextW, Layout.Alignment.ALIGN_CENTER, 1.1f, 1f)
-            val addrLayout = makeStaticLayout(MADRASA_ADDRESS, addrPaint, headerTextW, Layout.Alignment.ALIGN_CENTER, 1.1f, 1f)
+            val titleLayout = makeStaticLayout(madrasaInfo.name, titlePaint, headerTextW, Layout.Alignment.ALIGN_CENTER, 1.1f, 1f)
+            val addrLayout = makeStaticLayout(madrasaInfo.address, addrPaint, headerTextW, Layout.Alignment.ALIGN_CENTER, 1.1f, 1f)
 
             val headerHeight = maxOf(68f, titleLayout.height + addrLayout.height + 34f)
             val headerBottom = headerTop + headerHeight
@@ -222,7 +242,9 @@ object PdfPrintUtil {
             })
 
             if (logoBmp != null) {
-                canvas.drawBitmap(logoBmp, LEFT + 10f, headerTop + (headerHeight - 48f) / 2f, null)
+                val logoLeft = LEFT + 10f
+                val logoTop = headerTop + (headerHeight - 48f) / 2f
+                canvas.drawBitmap(logoBmp, null, RectF(logoLeft, logoTop, logoLeft + 48f, logoTop + 48f), highQualityBitmapPaint)
             }
 
             var ty = headerTop + 10f
@@ -237,7 +259,7 @@ object PdfPrintUtil {
                 typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
                 textAlign = Paint.Align.CENTER
             }
-            canvas.drawText("মোবাইল: $MADRASA_PHONE", headerTextStart + headerTextW / 2f, ty + 9f, phonePaint)
+            canvas.drawText("মোবাইল: ${madrasaInfo.phone}", headerTextStart + headerTextW / 2f, ty + 9f, phonePaint)
 
             // Gold Subtitle Ribbon (Wrapped)
             val ribbonPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -273,7 +295,7 @@ object PdfPrintUtil {
                 typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             }
             val layout = makeStaticLayout(
-                "$MADRASA_NAME — $reportBannerTitle (পৃষ্ঠা $pageNum)",
+                "${madrasaInfo.name} — $reportBannerTitle (পৃষ্ঠা $pageNum)",
                 textPaint,
                 (CONTENT_W - 16f).toInt(),
                 Layout.Alignment.ALIGN_CENTER,
@@ -947,10 +969,14 @@ object PdfPrintUtil {
         val ribbonBottom = headerBottom + 46f
         canvas.drawRect(0f, headerBottom, w, ribbonBottom, Paint().apply { color = accentGold })
 
+        val madrasaInfo = MadrasaInfoStore.getInfo(context)
+
         // Madrasa Logo + Header Texts (Strictly inside safe area!)
-        val logoBmp = loadMadrasaLogo(context, 92)
+        val logoBmp = loadHighResMadrasaLogo(context, 360)
         if (logoBmp != null) {
-            canvas.drawBitmap(logoBmp, (w - 92f) / 2f, bleed + 14f, null)
+            val logoLeft = (w - 92f) / 2f
+            val logoTop = bleed + 14f
+            canvas.drawBitmap(logoBmp, null, RectF(logoLeft, logoTop, logoLeft + 92f, logoTop + 92f), highQualityBitmapPaint)
         }
 
         val namePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -958,14 +984,14 @@ object PdfPrintUtil {
             textSize = 23f
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
         }
-        val nameLayout = makeStaticLayout(MADRASA_NAME, namePaint, safeW, Layout.Alignment.ALIGN_CENTER, 1.08f, 1f)
+        val nameLayout = makeStaticLayout(madrasaInfo.name, namePaint, safeW, Layout.Alignment.ALIGN_CENTER, 1.08f, 1f)
         canvas.drawLayoutAt(nameLayout, safeLeft, bleed + 112f)
 
         val addrPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
             color = 0xFFE2E8F0.toInt()
             textSize = 16.5f
         }
-        val addrLayout = makeStaticLayout(MADRASA_ADDRESS, addrPaint, safeW, Layout.Alignment.ALIGN_CENTER, 1.05f, 1f)
+        val addrLayout = makeStaticLayout(madrasaInfo.address, addrPaint, safeW, Layout.Alignment.ALIGN_CENTER, 1.05f, 1f)
         canvas.drawLayoutAt(addrLayout, safeLeft, bleed + 168f)
 
         // Ribbon Badge Text
@@ -1069,7 +1095,7 @@ object PdfPrintUtil {
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             textAlign = Paint.Align.CENTER
         }
-        canvas.drawText("জরুরি যোগাযোগ: $MADRASA_PHONE", w / 2f, footerTop + 28f, footText)
+        canvas.drawText("জরুরি যোগাযোগ: ${madrasaInfo.phone}", w / 2f, footerTop + 28f, footText)
 
         // Signatures right above footer inside safe margin
         val sigY = footerTop - 28f
@@ -1458,73 +1484,315 @@ object PdfPrintUtil {
     }
 
     // -------------------------------------------------------------------------
-    // 10. Question Paper (প্রশ্নপত্র) Multi-page A4 Wrapped PDF
+    // 10. Question Paper (প্রশ্নপত্র) Landscape A4 (297mm x 210mm) 2-Column PDF
+    //     Left & Right identical copies separated by a center dotted cut line
     // -------------------------------------------------------------------------
+    private sealed class QpItem {
+        data class Spacer(val height: Float) : QpItem()
+        data class TextBlock(val layout: StaticLayout, val bottomGap: Float) : QpItem()
+    }
+
     fun generateAndShareQuestionPaperPdf(context: Context, paper: QuestionPaperEntity) {
         try {
-            val doc = PdfDocument()
-            val cursor = A4PageCursor(context, doc, "${paper.examName} — প্রশ্নপত্র")
+            // Standard A4 Landscape (297mm x 210mm) at 72 DPI = 842 x 595 pt
+            val pageW = A4_HEIGHT // 842
+            val pageH = A4_WIDTH  // 595
+            val halfW = pageW / 2f // 421f
 
-            // Meta bar (Class, Subject, Time, Full Marks) wrapped
-            val metaText = "শ্রেণী/জামাত: ${paper.className}    •    বিষয়: ${paper.subject}\nসময়: ${paper.duration}    •    পূর্ণমান: ${paper.fullMarks}    •    তারিখ: ${paper.date}"
-            val metaPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = 0xFF0A5C36.toInt()
+            // Symmetric margins inside each 421pt half (20pt outer frame margin, 30pt content margin)
+            val borderLeft = 20f
+            val borderRight = halfW - 20f // 401f
+            val borderTop = 20f
+            val borderBottom = pageH - 20f // 575f
+
+            val colLeft = 30f
+            val colRight = halfW - 30f // 391f
+            val colW = colRight - colLeft // 361f
+            val colTopStart = 30f
+            val footerY = pageH - 30f // 565f
+            val maxContentY = footerY - 22f // 543f
+
+            val logoBmp = loadHighResMadrasaLogo(context, 512)
+
+            // Pre-build First-Page Header & Continuation Header layouts once (shared by both halves)
+            val titlePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.WHITE
                 textSize = 11f
                 typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             }
-            val metaLayout = makeStaticLayout(metaText, metaPaint, (CONTENT_W - 20f).toInt(), Layout.Alignment.ALIGN_CENTER, 1.25f, 2f)
-            val metaH = metaLayout.height + 16f
-            cursor.ensureSpace(metaH)
-            cursor.canvas.drawRoundRect(LEFT, cursor.y, RIGHT, cursor.y + metaH, 8f, 8f, Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = 0xFFEAF7EF.toInt()
-            })
-            cursor.canvas.drawRoundRect(LEFT, cursor.y, RIGHT, cursor.y + metaH, 8f, 8f, Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = 0xFF0A5C36.toInt()
-                style = Paint.Style.STROKE
-                strokeWidth = 1f
-            })
-            cursor.canvas.drawLayoutAt(metaLayout, LEFT + 10f, cursor.y + 8f)
-            cursor.y += metaH + 10f
+            val addrPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = 0xFFE2E8F0.toInt()
+                textSize = 8.2f
+            }
+            val headerTextStart = if (logoBmp != null) colLeft + 48f else colLeft + 8f
+            val headerTextW = (colRight - headerTextStart - 8f).toInt()
+            val madrasaInfo = MadrasaInfoStore.getInfo(context)
+            val titleLayout = makeStaticLayout(madrasaInfo.name, titlePaint, headerTextW, Layout.Alignment.ALIGN_CENTER, 1.1f, 0.5f)
+            val addrLayout = makeStaticLayout(madrasaInfo.address, addrPaint, headerTextW, Layout.Alignment.ALIGN_CENTER, 1.1f, 0.5f)
+            val headerBoxH = maxOf(50f, titleLayout.height + addrLayout.height + 24f)
 
-            if (paper.instructions.isNotBlank()) {
+            val ribbonPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = 0xFF0A3656.toInt()
+                textSize = 9.5f
+                typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            }
+            val ribbonLayout = makeStaticLayout(
+                "${paper.examName} — প্রশ্নপত্র",
+                ribbonPaint,
+                (colW - 14f).toInt(),
+                Layout.Alignment.ALIGN_CENTER,
+                1.1f,
+                0.5f
+            )
+            val ribbonH = maxOf(20f, ribbonLayout.height + 8f)
+
+            val metaText = "শ্রেণী/জামাত: ${paper.className}  •  বিষয়: ${paper.subject}\nসময়: ${paper.duration}  •  পূর্ণমান: ${paper.fullMarks}  •  তারিখ: ${paper.date}"
+            val metaPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = 0xFF0A3656.toInt()
+                textSize = 9f
+                typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            }
+            val metaLayout = makeStaticLayout(metaText, metaPaint, (colW - 14f).toInt(), Layout.Alignment.ALIGN_CENTER, 1.2f, 1f)
+            val metaH = metaLayout.height + 12f
+
+            val instLayout = if (paper.instructions.isNotBlank()) {
                 val instPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
                     color = 0xFF475569.toInt()
-                    textSize = 10.5f
+                    textSize = 8.8f
                     typeface = Typeface.create(Typeface.DEFAULT, Typeface.ITALIC)
                 }
-                val instLayout = makeStaticLayout("বিশেষ নির্দেশনা: ${paper.instructions}", instPaint, CONTENT_W.toInt(), Layout.Alignment.ALIGN_NORMAL, 1.2f, 1f)
-                cursor.ensureSpace(instLayout.height + 8f)
-                cursor.canvas.drawLayoutAt(instLayout, LEFT, cursor.y)
-                cursor.y += instLayout.height + 10f
+                makeStaticLayout("বিশেষ নির্দেশনা: ${paper.instructions}", instPaint, colW.toInt(), Layout.Alignment.ALIGN_NORMAL, 1.18f, 1f)
+            } else {
+                null
             }
 
-            cursor.canvas.drawLine(LEFT, cursor.y, RIGHT, cursor.y, Paint().apply { color = 0xFFCBD5E1.toInt(); strokeWidth = 1f })
-            cursor.y += 12f
+            val firstPageBodyStartY = colTopStart +
+                headerBoxH + 4f +
+                ribbonH + 7f +
+                metaH + 7f +
+                (instLayout?.let { it.height + 7f } ?: 0f) +
+                8f
 
-            // Render questions line-by-line / paragraph-by-paragraph with auto page-break!
+            val contHeaderPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = 0xFF0A3656.toInt()
+                textSize = 9f
+                typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            }
+            val contHeaderLayout = makeStaticLayout(
+                "${madrasaInfo.name} — ${paper.examName} (${paper.subject})",
+                contHeaderPaint,
+                (colW - 12f).toInt(),
+                Layout.Alignment.ALIGN_CENTER,
+                1.1f,
+                0.5f
+            )
+            val contHeaderH = maxOf(20f, contHeaderLayout.height + 8f)
+            val contPageBodyStartY = colTopStart + contHeaderH + 8f
+
+            // Pre-wrap and paginate all question lines for the 361pt column width
             val qPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = 0xFF111827.toInt()
-                textSize = 11.5f
+                textSize = 10f
             }
-            val lines = paper.questionsText.split("\n")
-            for (line in lines) {
-                if (line.isBlank()) {
-                    cursor.y += 8f
+            val pages = mutableListOf<List<QpItem>>()
+            var currentItems = mutableListOf<QpItem>()
+            var cursorY = firstPageBodyStartY
+
+            for (rawLine in paper.questionsText.split("\n")) {
+                if (rawLine.isBlank()) {
+                    val gap = 6f
+                    if (cursorY + gap <= maxContentY) {
+                        currentItems.add(QpItem.Spacer(gap))
+                        cursorY += gap
+                    }
                     continue
                 }
-                val layout = makeStaticLayout(line, qPaint, CONTENT_W.toInt(), Layout.Alignment.ALIGN_NORMAL, 1.3f, 2f)
-                cursor.ensureSpace(layout.height + 6f)
-                cursor.canvas.drawLayoutAt(layout, LEFT, cursor.y)
-                cursor.y += layout.height + 6f
+                val layout = makeStaticLayout(rawLine, qPaint, colW.toInt(), Layout.Alignment.ALIGN_NORMAL, 1.25f, 1.5f)
+                val needed = layout.height + 5f
+                if (cursorY + needed > maxContentY && currentItems.isNotEmpty()) {
+                    pages.add(currentItems)
+                    currentItems = mutableListOf()
+                    cursorY = contPageBodyStartY
+                }
+                currentItems.add(QpItem.TextBlock(layout, 5f))
+                cursorY += needed
+            }
+            if (currentItems.isNotEmpty() || pages.isEmpty()) {
+                pages.add(currentItems)
             }
 
-            cursor.finishDocument()
+            fun drawSingleCopyOnHalf(canvas: Canvas, pageIndex: Int, totalPages: Int, items: List<QpItem>) {
+                val pageNum = pageIndex + 1
+
+                // Outer frame inside each half
+                canvas.drawRoundRect(
+                    borderLeft, borderTop, borderRight, borderBottom,
+                    8f, 8f,
+                    Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                        color = 0xFF0B4F6C.toInt()
+                        style = Paint.Style.STROKE
+                        strokeWidth = 1.2f
+                    }
+                )
+
+                var y = colTopStart
+                if (pageIndex == 0) {
+                    // Header banner (Deep Ocean Teal)
+                    canvas.drawRoundRect(
+                        colLeft, y, colRight, y + headerBoxH,
+                        6f, 6f,
+                        Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF0A3656.toInt() }
+                    )
+                    if (logoBmp != null) {
+                        val logoLeft = colLeft + 8f
+                        val logoTop = y + (headerBoxH - 36f) / 2f
+                        canvas.drawBitmap(logoBmp, null, RectF(logoLeft, logoTop, logoLeft + 36f, logoTop + 36f), highQualityBitmapPaint)
+                    }
+                    var ty = y + 7f
+                    canvas.drawLayoutAt(titleLayout, headerTextStart, ty)
+                    ty += titleLayout.height + 2f
+                    canvas.drawLayoutAt(addrLayout, headerTextStart, ty)
+                    ty += addrLayout.height + 3f
+
+                    val phonePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                        color = 0xFFD4AF37.toInt()
+                        textSize = 8f
+                        typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                        textAlign = Paint.Align.CENTER
+                    }
+                    canvas.drawText("মোবাইল: ${madrasaInfo.phone}", headerTextStart + headerTextW / 2f, ty + 7f, phonePaint)
+                    y += headerBoxH + 4f
+
+                    // Gold exam title ribbon
+                    canvas.drawRoundRect(
+                        colLeft, y, colRight, y + ribbonH,
+                        4f, 4f,
+                        Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFD4AF37.toInt() }
+                    )
+                    canvas.drawLayoutAt(ribbonLayout, colLeft + 7f, y + (ribbonH - ribbonLayout.height) / 2f)
+                    y += ribbonH + 7f
+
+                    // Meta bar (Class, Subject, Time, Marks)
+                    canvas.drawRoundRect(
+                        colLeft, y, colRight, y + metaH,
+                        6f, 6f,
+                        Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFE6F4FA.toInt() }
+                    )
+                    canvas.drawRoundRect(
+                        colLeft, y, colRight, y + metaH,
+                        6f, 6f,
+                        Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                            color = 0xFF0B4F6C.toInt()
+                            style = Paint.Style.STROKE
+                            strokeWidth = 0.8f
+                        }
+                    )
+                    canvas.drawLayoutAt(metaLayout, colLeft + 7f, y + 6f)
+                    y += metaH + 7f
+
+                    if (instLayout != null) {
+                        canvas.drawLayoutAt(instLayout, colLeft, y)
+                        y += instLayout.height + 7f
+                    }
+
+                    canvas.drawLine(colLeft, y, colRight, y, Paint().apply {
+                        color = 0xFFCBD5E1.toInt()
+                        strokeWidth = 0.8f
+                    })
+                    y += 8f
+                } else {
+                    // Continuation header on Page 2+
+                    canvas.drawRoundRect(
+                        colLeft, y, colRight, y + contHeaderH,
+                        5f, 5f,
+                        Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFE6F4FA.toInt() }
+                    )
+                    canvas.drawLayoutAt(contHeaderLayout, colLeft + 6f, y + (contHeaderH - contHeaderLayout.height) / 2f)
+                    y += contHeaderH + 8f
+                }
+
+                // Draw questions inside this half
+                for (item in items) {
+                    when (item) {
+                        is QpItem.Spacer -> y += item.height
+                        is QpItem.TextBlock -> {
+                            canvas.drawLayoutAt(item.layout, colLeft, y)
+                            y += item.layout.height + item.bottomGap
+                        }
+                    }
+                }
+
+                // Footer inside each half
+                canvas.drawLine(colLeft, footerY - 10f, colRight, footerY - 10f, Paint().apply {
+                    color = 0xFFD0D7DE.toInt()
+                    strokeWidth = 0.6f
+                })
+                canvas.drawText(
+                    madrasaInfo.name,
+                    colLeft,
+                    footerY,
+                    Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                        color = 0xFF64748B.toInt()
+                        textSize = 7.5f
+                        textAlign = Paint.Align.LEFT
+                    }
+                )
+                canvas.drawText(
+                    "পৃষ্ঠা $pageNum / $totalPages",
+                    colRight,
+                    footerY,
+                    Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                        color = 0xFF0A3656.toInt()
+                        textSize = 7.5f
+                        typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                        textAlign = Paint.Align.RIGHT
+                    }
+                )
+            }
+
+            val doc = PdfDocument()
+            val cutLinePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = 0xFF64748B.toInt()
+                style = Paint.Style.STROKE
+                strokeWidth = 1f
+                pathEffect = DashPathEffect(floatArrayOf(3f, 4f), 0f)
+            }
+            val cutPath = Path().apply {
+                moveTo(halfW, 12f)
+                lineTo(halfW, pageH - 12f)
+            }
+
+            pages.forEachIndexed { idx, items ->
+                val info = PdfDocument.PageInfo.Builder(pageW, pageH, idx + 1).create()
+                val page = doc.startPage(info)
+                val canvas = page.canvas
+
+                // White page background
+                canvas.drawRect(0f, 0f, pageW.toFloat(), pageH.toFloat(), Paint().apply { color = Color.WHITE })
+
+                // Left Side Copy
+                canvas.save()
+                drawSingleCopyOnHalf(canvas, idx, pages.size, items)
+                canvas.restore()
+
+                // Center Dotted Cut Line
+                canvas.drawPath(cutPath, cutLinePaint)
+
+                // Right Side Identical Copy
+                canvas.save()
+                canvas.translate(halfW, 0f)
+                drawSingleCopyOnHalf(canvas, idx, pages.size, items)
+                canvas.restore()
+
+                doc.finishPage(page)
+            }
+
             val safeSub = paper.subject.replace("\\s+".toRegex(), "_")
             val pdfFile = File(context.cacheDir, "Question_${safeSub}_${paper.className.replace("\\s+".toRegex(), "_")}.pdf")
             FileOutputStream(pdfFile).use { out -> doc.writeTo(out) }
             doc.close()
 
-            shareOrOpenPdf(context, pdfFile, "প্রশ্নপত্র - ${paper.subject} (${paper.className})")
+            shareOrOpenPdf(context, pdfFile, "প্রশ্নপত্র (২-কপি ল্যান্ডস্কেপ) - ${paper.subject} (${paper.className})")
         } catch (e: Exception) {
             Toast.makeText(context, "প্রশ্নপত্র তৈরিতে ত্রুটি: ${e.message}", Toast.LENGTH_LONG).show()
         }

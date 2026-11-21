@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.R
+import com.example.data.MadrasaInfo
 import com.example.data.entity.ResultEntity
 import com.example.data.entity.StudentEntity
 import com.example.data.entity.SubjectMark
@@ -83,6 +84,7 @@ fun calculateRankBengali(rankNum: Int): String {
 fun ResultsScreen(
     students: List<StudentEntity>,
     results: List<ResultEntity>,
+    madrasaInfo: MadrasaInfo = MadrasaInfo(),
     onSaveResult: (Int, Int, String, List<SubjectMark>, String?) -> Unit,
     onDeleteResult: (Int) -> Unit,
     gradeCalculator: (Double) -> String
@@ -430,14 +432,14 @@ fun ResultsScreen(
                                 )
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Text(
-                                    text = "ইসহাকিয়া কেরাতুল কোরআন নূরানী ও হাফেজিয়া মাদ্রাসা",
+                                    text = madrasaInfo.name,
                                     fontSize = 14.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = Color.White,
                                     textAlign = TextAlign.Center
                                 )
                                 Text(
-                                    text = "পশ্চিম তুষখালী, ছোটবিঘাই, পটুয়াখালী সদর • +8801726541607",
+                                    text = "${madrasaInfo.address} • ${madrasaInfo.phone}",
                                     fontSize = 10.sp,
                                     color = Color.White.copy(alpha = 0.85f),
                                     textAlign = TextAlign.Center

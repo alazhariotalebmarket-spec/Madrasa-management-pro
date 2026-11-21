@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.R
+import com.example.data.MadrasaInfo
 import com.example.data.entity.StudentEntity
 import com.example.ui.components.ImageCropperDialog
 import com.example.ui.components.MadrasaEmptyState
@@ -46,6 +47,7 @@ import com.example.ui.theme.TextDark
 @Composable
 fun StudentsScreen(
     students: List<StudentEntity>,
+    madrasaInfo: MadrasaInfo = MadrasaInfo(),
     onAddStudent: (String, String, String, String, Double, String, String, Double) -> Unit,
     onUpdateStudent: (StudentEntity) -> Unit,
     onDeleteStudent: (Int) -> Unit
@@ -487,6 +489,7 @@ fun StudentsScreen(
     if (selectedStudentForIdCard != null) {
         StudentIdCardDialog(
             student = selectedStudentForIdCard!!,
+            madrasaInfo = madrasaInfo,
             onDismiss = { selectedStudentForIdCard = null }
         )
     }
@@ -495,6 +498,7 @@ fun StudentsScreen(
 @Composable
 fun StudentIdCardDialog(
     student: StudentEntity,
+    madrasaInfo: MadrasaInfo = MadrasaInfo(),
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
@@ -561,20 +565,20 @@ fun StudentIdCardDialog(
                             )
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                text = "ইসহাকিয়া কেরাতুল কোরআন নূরানী ও হাফেজিয়া মাদ্রাসা",
+                                text = madrasaInfo.name,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White,
                                 textAlign = TextAlign.Center
                             )
                             Text(
-                                text = "পশ্চিম তুষখালী, ছোটবিঘাই, পটুয়াখালী সদর, পটুয়াখালী",
+                                text = madrasaInfo.address,
                                 fontSize = 10.sp,
                                 color = Color.White.copy(alpha = 0.85f),
                                 textAlign = TextAlign.Center
                             )
                             Text(
-                                text = "মোবাইল: +8801726541607",
+                                text = "মোবাইল: ${madrasaInfo.phone}",
                                 fontSize = 9.sp,
                                 color = MadrasaGold,
                                 textAlign = TextAlign.Center
