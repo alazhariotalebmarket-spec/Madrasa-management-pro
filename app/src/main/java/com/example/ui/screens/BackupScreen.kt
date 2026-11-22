@@ -4,6 +4,8 @@ import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
@@ -21,6 +23,7 @@ import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.CloudUpload
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Login
 import androidx.compose.material.icons.filled.Refresh
@@ -32,8 +35,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -53,6 +58,10 @@ import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.android.gms.common.api.ApiException
 import com.google.android.gms.common.api.CommonStatusCodes
 import com.google.android.gms.common.api.Scope
+import com.google.firebase.Firebase
+import com.google.firebase.auth.OAuthCredential
+import com.google.firebase.auth.OAuthProvider
+import com.google.firebase.auth.auth
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -66,6 +75,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
+import java.security.MessageDigest
 import java.text.SimpleDateFormat
 import java.util.*
 import kotlin.coroutines.resume
@@ -88,6 +98,34 @@ private tailrec fun Context.findActivity(): Activity? = when (this) {
     is Activity -> this
     is ContextWrapper -> baseContext.findActivity()
     else -> null
+}
+
+private fun getAppSigningSha1(context: Context): String {
+    return try {
+        val signatures = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            val info = context.packageManager.getPackageInfo(
+                context.packageName,
+                PackageManager.GET_SIGNING_CERTIFICATES
+            )
+            val signingInfo = info.signingInfo
+            if (signingInfo == null) emptyArray()
+            else if (signingInfo.hasMultipleSigners()) signingInfo.apkContentsSigners
+            else signingInfo.signingCertificateHistory
+        } else {
+            @Suppress("DEPRECATION")
+            val info = context.packageManager.getPackageInfo(
+                context.packageName,
+                PackageManager.GET_SIGNATURES
+            )
+            @Suppress("DEPRECATION")
+            info.signatures ?: emptyArray()
+        }
+        val certBytes = signatures.firstOrNull()?.toByteArray() ?: return ""
+        val digest = MessageDigest.getInstance("SHA-1").digest(certBytes)
+        digest.joinToString(":") { "%02X".format(it) }
+    } catch (_: Exception) {
+        ""
+    }
 }
 
 private const val DRIVE_APPDATA_SCOPE = "https://www.googleapis.com/auth/drive.appdata"
@@ -178,7 +216,9 @@ fun BackupScreen(
     viewModel: MadrasaViewModel
 ) {
     val context = LocalContext.current
+    val clipboardManager = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
+    val appSha1 = remember { getAppSigningSha1(context) }
     val students by viewModel.students.collectAsState()
     val fees by viewModel.fees.collectAsState()
     val results by viewModel.results.collectAsState()
@@ -201,6 +241,7 @@ fun BackupScreen(
     var isUploading by remember { mutableStateOf(false) }
     var isLoadingDriveFiles by remember { mutableStateOf(false) }
     var connectionError by remember { mutableStateOf<String?>(null) }
+    var showSha1Diagnostic by remember { mutableStateOf(false) }
 
     var showDriveRestoreDialog by remember { mutableStateOf(false) }
     var driveBackups by remember { mutableStateOf<List<DriveBackupEntry>>(emptyList()) }
@@ -229,6 +270,7 @@ fun BackupScreen(
             connectedEmail = verified.email
             activeAccessToken = verified.accessToken
             connectionError = null
+            showSha1Diagnostic = false
             prefs.edit()
                 .putBoolean("is_connected", true)
                 .putString("connected_email", verified.email)
@@ -293,7 +335,85 @@ fun BackupScreen(
     }
 
     LaunchedEffect(Unit) {
-        runSilentConnectionTest(showStatusToast = false)
+        val pendingTask = try { Firebase.auth.pendingAuthResult } catch (_: Exception) { null }
+        if (pendingTask != null) {
+            pendingTask
+                .addOnSuccessListener { authRes ->
+                    val token = (authRes.credential as? OAuthCredential)?.accessToken
+                    if (!token.isNullOrBlank()) {
+                        scope.launch {
+                            handleVerifiedToken(token, showSuccessToast = true)
+                            isCheckingConnection = false
+                        }
+                    } else {
+                        scope.launch { runSilentConnectionTest(showStatusToast = false) }
+                    }
+                }
+                .addOnFailureListener {
+                    scope.launch { runSilentConnectionTest(showStatusToast = false) }
+                }
+        } else {
+            runSilentConnectionTest(showStatusToast = false)
+        }
+    }
+
+    fun launchFirebaseWebOAuthFallback(priorReason: String = "") {
+        val activity = context.findActivity()
+        if (activity == null) {
+            isConnecting = false
+            clearLocalConnectionState()
+            showSha1Diagnostic = true
+            connectionError = priorReason.ifBlank { "Activity পাওয়া যায়নি" }
+            return
+        }
+        try {
+            val provider = OAuthProvider.newBuilder("google.com")
+                .setScopes(listOf(DRIVE_APPDATA_SCOPE))
+                .addCustomParameter("prompt", "select_account consent")
+                .build()
+            Firebase.auth.startActivityForSignInWithProvider(activity, provider)
+                .addOnSuccessListener { authResult ->
+                    val oauthCred = authResult.credential as? OAuthCredential
+                    val token = oauthCred?.accessToken
+                    scope.launch {
+                        if (!token.isNullOrBlank()) {
+                            handleVerifiedToken(token, showSuccessToast = true)
+                        } else {
+                            clearLocalConnectionState()
+                            showSha1Diagnostic = true
+                            connectionError = "Google Drive Access Token পাওয়া যায়নি।"
+                            Toast.makeText(context, connectionError, Toast.LENGTH_LONG).show()
+                        }
+                        isConnecting = false
+                    }
+                }
+                .addOnFailureListener { err ->
+                    isConnecting = false
+                    clearLocalConnectionState()
+                    val detail = err.localizedMessage ?: "OAuth failed"
+                    val isUserCanceled = detail.contains("canceled", ignoreCase = true) ||
+                        detail.contains("cancelled", ignoreCase = true)
+                    showSha1Diagnostic = !isUserCanceled
+                    connectionError = if (isUserCanceled) {
+                        "গুগল ড্রাইভ অনুমতি বাতিল করা হয়েছে (Not Connected)"
+                    } else if (priorReason.isNotBlank()) {
+                        "$priorReason\nWeb OAuth: $detail"
+                    } else {
+                        "Google Drive OAuth failed: $detail"
+                    }
+                    Toast.makeText(context, connectionError, Toast.LENGTH_LONG).show()
+                }
+        } catch (e: Exception) {
+            isConnecting = false
+            clearLocalConnectionState()
+            showSha1Diagnostic = true
+            connectionError = if (priorReason.isNotBlank()) {
+                "$priorReason\nWeb OAuth error: ${e.localizedMessage}"
+            } else {
+                "Google Drive OAuth error: ${e.localizedMessage}"
+            }
+            Toast.makeText(context, connectionError, Toast.LENGTH_LONG).show()
+        }
     }
 
     val consentRecoverLauncher = rememberLauncherForActivityResult(
@@ -333,7 +453,6 @@ fun BackupScreen(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { actResult ->
         scope.launch {
-            isConnecting = true
             try {
                 val task = GoogleSignIn.getSignedInAccountFromIntent(actResult.data)
                 val account = task.getResult(ApiException::class.java)
@@ -343,32 +462,29 @@ fun BackupScreen(
                         GoogleAuthUtil.getToken(context, androidAccount, "oauth2:$DRIVE_APPDATA_SCOPE")
                     }
                     handleVerifiedToken(token, showSuccessToast = true)
+                    isConnecting = false
                 } else {
-                    clearLocalConnectionState()
-                    connectionError = "Google account তথ্য পাওয়া যায়নি"
-                    Toast.makeText(context, connectionError, Toast.LENGTH_LONG).show()
+                    launchFirebaseWebOAuthFallback("Google account তথ্য পাওয়া যায়নি")
                 }
             } catch (e: UserRecoverableAuthException) {
                 e.intent?.let { intent ->
                     consentRecoverLauncher.launch(intent)
                     return@launch
                 }
-                clearLocalConnectionState()
-                connectionError = "অনুমতি প্রয়োজন: ${e.localizedMessage}"
+                launchFirebaseWebOAuthFallback("Recoverable auth error: ${e.localizedMessage}")
             } catch (e: ApiException) {
-                clearLocalConnectionState()
-                connectionError = if (e.statusCode == CommonStatusCodes.CANCELED || e.statusCode == 12501) {
-                    "গুগল ড্রাইভ অনুমতি বাতিল করা হয়েছে (Not Connected)"
+                if (e.statusCode == CommonStatusCodes.CANCELED || e.statusCode == 12501) {
+                    isConnecting = false
+                    clearLocalConnectionState()
+                    connectionError = "গুগল ড্রাইভ অনুমতি বাতিল করা হয়েছে (Not Connected)"
+                    Toast.makeText(context, connectionError, Toast.LENGTH_SHORT).show()
                 } else {
-                    "Google Sign-In failed (${e.statusCode}): ${e.localizedMessage ?: "Configuration error"}"
+                    // Status 10 (DEVELOPER_ERROR) typically means APK signing cert != debug.keystore SHA-1
+                    // Fall back seamlessly to Firebase Web Custom Tab OAuth flow
+                    launchFirebaseWebOAuthFallback("Play Services Sign-In (${e.statusCode})")
                 }
-                Toast.makeText(context, connectionError, Toast.LENGTH_LONG).show()
             } catch (e: Exception) {
-                clearLocalConnectionState()
-                connectionError = "Google Sign-In error: ${e.localizedMessage ?: "Unknown"}"
-                Toast.makeText(context, connectionError, Toast.LENGTH_LONG).show()
-            } finally {
-                isConnecting = false
+                launchFirebaseWebOAuthFallback("Google Sign-In error: ${e.localizedMessage ?: "Unknown"}")
             }
         }
     }
@@ -382,10 +498,7 @@ fun BackupScreen(
             val gsiClient = GoogleSignIn.getClient(context, gso)
             googleSignInFallbackLauncher.launch(gsiClient.signInIntent)
         } catch (e: Exception) {
-            isConnecting = false
-            clearLocalConnectionState()
-            connectionError = "Google Sign-In শুরু করা যায়নি: ${e.localizedMessage}"
-            Toast.makeText(context, connectionError, Toast.LENGTH_LONG).show()
+            launchFirebaseWebOAuthFallback("Google Sign-In init: ${e.localizedMessage}")
         }
     }
 
@@ -394,7 +507,6 @@ fun BackupScreen(
         contract = ActivityResultContracts.StartIntentSenderForResult()
     ) { activityResult ->
         scope.launch {
-            isConnecting = true
             try {
                 val activity = context.findActivity()
                 val client = if (activity != null) {
@@ -408,10 +520,9 @@ fun BackupScreen(
                     val token = authResult.accessToken
                     if (!token.isNullOrBlank()) {
                         handleVerifiedToken(token, showSuccessToast = true)
+                        isConnecting = false
                     } else {
-                        clearLocalConnectionState()
-                        connectionError = "Google কোন Access Token দেয়নি (Not Connected)"
-                        Toast.makeText(context, connectionError, Toast.LENGTH_LONG).show()
+                        launchFirebaseWebOAuthFallback("Google কোন Access Token দেয়নি")
                     }
                 } else {
                     var apiEx: ApiException? = null
@@ -427,6 +538,7 @@ fun BackupScreen(
                         launchGoogleSignInFallback()
                         return@launch
                     }
+                    isConnecting = false
                     clearLocalConnectionState()
                     connectionError = "গুগল ড্রাইভ অনুমতি বাতিল করা হয়েছে (Not Connected)"
                     Toast.makeText(context, connectionError, Toast.LENGTH_SHORT).show()
@@ -436,16 +548,12 @@ fun BackupScreen(
                     launchGoogleSignInFallback()
                     return@launch
                 }
+                isConnecting = false
                 clearLocalConnectionState()
                 connectionError = "গুগল ড্রাইভ অনুমতি বাতিল করা হয়েছে (Not Connected)"
                 Toast.makeText(context, connectionError, Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
-                clearLocalConnectionState()
-                val msg = "Google Sign-In error: ${e.localizedMessage ?: "Unknown"}"
-                connectionError = msg
-                Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
-            } finally {
-                isConnecting = false
+                launchFirebaseWebOAuthFallback("Auth error: ${e.localizedMessage ?: "Unknown"}")
             }
         }
     }
@@ -454,6 +562,7 @@ fun BackupScreen(
         if (isConnecting) return
         isConnecting = true
         connectionError = null
+        showSha1Diagnostic = false
         scope.launch {
             try {
                 val result = authorizeDriveResult(context, DRIVE_SCOPES)
@@ -497,6 +606,10 @@ fun BackupScreen(
             }
             withContext(Dispatchers.Main) {
                 try {
+                    Firebase.auth.signOut()
+                } catch (_: Exception) {
+                }
+                try {
                     val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
                         .requestEmail()
                         .requestScopes(Scope(DRIVE_APPDATA_SCOPE))
@@ -508,6 +621,7 @@ fun BackupScreen(
                 }
                 clearLocalConnectionState()
                 connectionError = null
+                showSha1Diagnostic = false
                 Toast.makeText(context, "Google Drive Disconnected & Revoked", Toast.LENGTH_SHORT).show()
             }
         }
@@ -950,12 +1064,39 @@ fun BackupScreen(
                         border = BorderStroke(1.dp, MadrasaRed.copy(alpha = 0.35f)),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text(
-                            text = connectionError!!,
-                            color = MadrasaRed,
-                            fontSize = 12.sp,
-                            modifier = Modifier.padding(10.dp)
-                        )
+                        Column(modifier = Modifier.padding(10.dp)) {
+                            Text(
+                                text = connectionError!!,
+                                color = MadrasaRed,
+                                fontSize = 12.sp
+                            )
+                            if (showSha1Diagnostic && appSha1.isNotBlank()) {
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    text = "App ID: ${context.packageName}\nAPK SHA-1: $appSha1",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    fontSize = 10.5.sp
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                TextButton(
+                                    onClick = {
+                                        clipboardManager.setText(AnnotatedString(appSha1))
+                                        Toast.makeText(context, "SHA-1 কপি করা হয়েছে", Toast.LENGTH_SHORT).show()
+                                    },
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                    modifier = Modifier.heightIn(min = 36.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.ContentCopy,
+                                        contentDescription = "Copy SHA-1",
+                                        modifier = Modifier.size(14.dp),
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("SHA-1 কপি করুন", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                                }
+                            }
+                        }
                     }
                 }
 
