@@ -1,13 +1,16 @@
 package com.example.ui.screens
 
-import android.accounts.Account
-import android.accounts.AccountManager
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import android.content.Intent
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -16,9 +19,12 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Login
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -36,15 +42,17 @@ import com.example.ui.components.madrasaCardBorder
 import com.example.ui.theme.MadrasaAccent
 import com.example.ui.theme.MadrasaGreen
 import com.example.ui.theme.MadrasaPrimary
+import com.example.ui.theme.MadrasaRed
 import com.example.ui.viewmodel.MadrasaViewModel
-import com.example.util.PdfPrintUtil
-import com.google.android.gms.auth.GoogleAuthUtil
+import com.google.android.gms.auth.api.identity.AuthorizationRequest
+import com.google.android.gms.auth.api.identity.Identity
 import com.google.android.gms.auth.api.signin.GoogleSignIn
-import com.google.android.gms.auth.api.signin.GoogleSignInClient
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
+import com.google.android.gms.common.api.ApiException
 import com.google.android.gms.common.api.Scope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
@@ -54,10 +62,117 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
-import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.*
+import kotlin.coroutines.resume
+
+private data class DriveBackupEntry(
+    val id: String,
+    val name: String,
+    val modifiedTime: String,
+    val sizeBytes: Long
+)
+
+private data class VerifiedDriveSession(
+    val isValid: Boolean,
+    val email: String = "",
+    val accessToken: String = "",
+    val errorMessage: String = ""
+)
+
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
+}
+
+private val DRIVE_SCOPES_FULL = listOf(
+    Scope("https://www.googleapis.com/auth/drive.file"),
+    Scope("https://www.googleapis.com/auth/drive.appdata"),
+    Scope("https://www.googleapis.com/auth/userinfo.email"),
+    Scope("https://www.googleapis.com/auth/userinfo.profile")
+)
+
+private val DRIVE_SCOPES_APPDATA = listOf(
+    Scope("https://www.googleapis.com/auth/drive.appdata"),
+    Scope("https://www.googleapis.com/auth/userinfo.email"),
+    Scope("https://www.googleapis.com/auth/userinfo.profile")
+)
+
+private suspend fun verifyGoogleDriveToken(token: String): VerifiedDriveSession {
+    return withContext(Dispatchers.IO) {
+        try {
+            val client = OkHttpClient()
+            val aboutReq = Request.Builder()
+                .url("https://www.googleapis.com/drive/v3/about?fields=user(emailAddress,displayName)")
+                .addHeader("Authorization", "Bearer $token")
+                .get()
+                .build()
+            val aboutRes = client.newCall(aboutReq).execute()
+            val aboutBody = aboutRes.body?.string().orEmpty()
+
+            if (aboutRes.isSuccessful) {
+                val json = JSONObject(aboutBody)
+                var email = json.optJSONObject("user")?.optString("emailAddress", "").orEmpty()
+                if (email.isBlank()) {
+                    val userReq = Request.Builder()
+                        .url("https://www.googleapis.com/oauth2/v3/userinfo")
+                        .addHeader("Authorization", "Bearer $token")
+                        .get()
+                        .build()
+                    val userRes = client.newCall(userReq).execute()
+                    if (userRes.isSuccessful) {
+                        val userJson = JSONObject(userRes.body?.string().orEmpty())
+                        email = userJson.optString("email", "")
+                    }
+                }
+                VerifiedDriveSession(
+                    isValid = true,
+                    email = email.ifBlank { "Google Account" },
+                    accessToken = token
+                )
+            } else {
+                val errMsg = try {
+                    JSONObject(aboutBody).optJSONObject("error")?.optString("message") ?: "HTTP ${aboutRes.code}"
+                } catch (_: Exception) {
+                    "HTTP ${aboutRes.code}"
+                }
+                VerifiedDriveSession(
+                    isValid = false,
+                    errorMessage = "Drive API verification failed: $errMsg"
+                )
+            }
+        } catch (e: Exception) {
+            VerifiedDriveSession(
+                isValid = false,
+                errorMessage = "Network error: ${e.localizedMessage ?: "Unknown"}"
+            )
+        }
+    }
+}
+
+private suspend fun authorizeDriveResult(
+    context: Context,
+    scopes: List<Scope>
+) = suspendCancellableCoroutine<Result<com.google.android.gms.auth.api.identity.AuthorizationResult>> { cont ->
+    val activity = context.findActivity()
+    val client = if (activity != null) {
+        Identity.getAuthorizationClient(activity)
+    } else {
+        Identity.getAuthorizationClient(context)
+    }
+    val req = AuthorizationRequest.builder()
+        .setRequestedScopes(scopes)
+        .build()
+    client.authorize(req)
+        .addOnSuccessListener { res ->
+            if (cont.isActive) cont.resume(Result.success(res))
+        }
+        .addOnFailureListener { e ->
+            if (cont.isActive) cont.resume(Result.failure(e))
+        }
+}
 
 @Composable
 fun BackupScreen(
@@ -74,159 +189,214 @@ fun BackupScreen(
     val notices by viewModel.notices.collectAsState()
     val madrasaInfo by viewModel.madrasaInfo.collectAsState()
 
-    val prefs = remember { context.getSharedPreferences("google_drive_backup_prefs", android.content.Context.MODE_PRIVATE) }
+    val prefs = remember {
+        context.getSharedPreferences("google_drive_backup_prefs", Context.MODE_PRIVATE)
+    }
+
+    // Never trust local cache on startup — always default to false until Google verifies token
     var isGoogleConnected by remember { mutableStateOf(false) }
-    var connectedEmail by remember { mutableStateOf(prefs.getString("connected_email", "") ?: "") }
+    var connectedEmail by remember { mutableStateOf("") }
+    var activeAccessToken by remember { mutableStateOf<String?>(null) }
     var isCheckingConnection by remember { mutableStateOf(true) }
+    var isConnecting by remember { mutableStateOf(false) }
     var isUploading by remember { mutableStateOf(false) }
-    var lastBackupTime by remember { mutableStateOf(prefs.getString("last_backup_time", "কখনো ব্যাকআপ করা হয়নি") ?: "কখনো ব্যাকআপ করা হয়নি") }
-    var autoBackupFreq by remember { mutableStateOf(prefs.getString("auto_backup_freq", "প্রতিদিন") ?: "প্রতিদিন") }
+    var isLoadingDriveFiles by remember { mutableStateOf(false) }
+    var connectionError by remember { mutableStateOf<String?>(null) }
 
-    val gso = remember {
-        GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
-            .requestEmail()
-            .requestScopes(
-                Scope("https://www.googleapis.com/auth/drive.file"),
-                Scope("https://www.googleapis.com/auth/drive.appdata")
-            )
-            .build()
+    var showDriveRestoreDialog by remember { mutableStateOf(false) }
+    var driveBackups by remember { mutableStateOf<List<DriveBackupEntry>>(emptyList()) }
+
+    var lastBackupTime by remember {
+        mutableStateOf(prefs.getString("last_backup_time", "কখনো ব্যাকআপ করা হয়নি") ?: "কখনো ব্যাকআপ করা হয়নি")
     }
-    val googleSignInClient = remember { GoogleSignIn.getClient(context, gso) }
+    var autoBackupFreq by remember {
+        mutableStateOf(prefs.getString("auto_backup_freq", "প্রতিদিন") ?: "প্রতিদিন")
+    }
 
-    // Test Connection on Startup
-    LaunchedEffect(Unit) {
+    fun clearLocalConnectionState() {
+        isGoogleConnected = false
+        connectedEmail = ""
+        activeAccessToken = null
+        prefs.edit()
+            .putBoolean("is_connected", false)
+            .remove("connected_email")
+            .apply()
+    }
+
+    suspend fun handleVerifiedToken(token: String, showSuccessToast: Boolean) {
+        val verified = verifyGoogleDriveToken(token)
+        if (verified.isValid) {
+            isGoogleConnected = true
+            connectedEmail = verified.email
+            activeAccessToken = verified.accessToken
+            connectionError = null
+            prefs.edit()
+                .putBoolean("is_connected", true)
+                .putString("connected_email", verified.email)
+                .apply()
+            if (showSuccessToast) {
+                Toast.makeText(
+                    context,
+                    "Google Drive Connected (${verified.email})!",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        } else {
+            clearLocalConnectionState()
+            connectionError = verified.errorMessage
+            if (showSuccessToast) {
+                Toast.makeText(context, verified.errorMessage, Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    // Test Connection silently on Backup page open (never shows surprise popup if unauthenticated)
+    suspend fun runSilentConnectionTest(showStatusToast: Boolean = false) {
         isCheckingConnection = true
-        withContext(Dispatchers.IO) {
-            try {
-                val savedEmail = prefs.getString("connected_email", null)
-                val account = GoogleSignIn.getLastSignedInAccount(context)
-                val targetEmail = account?.email ?: savedEmail
-
-                if (!targetEmail.isNullOrBlank()) {
-                    val acc = if (account?.account != null) account.account!! else Account(targetEmail, "com.google")
-                    val token = try {
-                        GoogleAuthUtil.getToken(
-                            context,
-                            acc,
-                            "oauth2:https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.appdata"
-                        )
-                    } catch (_: Exception) {
-                        null
-                    }
-
-                    if (!token.isNullOrBlank()) {
-                        withContext(Dispatchers.Main) {
-                            isGoogleConnected = true
-                            connectedEmail = targetEmail
-                            prefs.edit().putBoolean("is_connected", true).putString("connected_email", connectedEmail).apply()
-                        }
-                    } else {
-                        withContext(Dispatchers.Main) {
-                            isGoogleConnected = false
-                            connectedEmail = ""
-                            prefs.edit().putBoolean("is_connected", false).remove("connected_email").apply()
-                        }
-                    }
-                } else {
-                    withContext(Dispatchers.Main) {
-                        isGoogleConnected = false
-                        connectedEmail = ""
-                        prefs.edit().putBoolean("is_connected", false).remove("connected_email").apply()
-                    }
-                }
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) {
-                    isGoogleConnected = false
-                    connectedEmail = ""
-                    prefs.edit().putBoolean("is_connected", false).remove("connected_email").apply()
-                }
-            } finally {
-                withContext(Dispatchers.Main) {
-                    isCheckingConnection = false
-                }
-            }
-        }
-    }
-
-    // Account Picker Launcher (Robust fallback for Error 10 / Play Services sign-in issues)
-    val accountPickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == android.app.Activity.RESULT_OK) {
-            val accountName = result.data?.getStringExtra(AccountManager.KEY_ACCOUNT_NAME)
-            if (!accountName.isNullOrBlank()) {
-                scope.launch(Dispatchers.IO) {
-                    try {
-                        val acc = Account(accountName, "com.google")
-                        val token = GoogleAuthUtil.getToken(
-                            context,
-                            acc,
-                            "oauth2:https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.appdata"
-                        )
-                        if (!token.isNullOrBlank()) {
-                            withContext(Dispatchers.Main) {
-                                isGoogleConnected = true
-                                connectedEmail = accountName
-                                prefs.edit().putBoolean("is_connected", true).putString("connected_email", connectedEmail).apply()
-                                Toast.makeText(context, "Google Drive Connected ($connectedEmail)!", Toast.LENGTH_SHORT).show()
-                            }
-                        } else {
-                            withContext(Dispatchers.Main) {
-                                Toast.makeText(context, "Google Drive token generation failed", Toast.LENGTH_LONG).show()
-                            }
-                        }
-                    } catch (e: Exception) {
-                        withContext(Dispatchers.Main) {
-                            Toast.makeText(context, "Connection error: ${e.message}", Toast.LENGTH_LONG).show()
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    val signInLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
         try {
-            val account = task.getResult(Exception::class.java)
-            if (account != null && account.account != null) {
-                scope.launch(Dispatchers.IO) {
-                    try {
-                        val token = GoogleAuthUtil.getToken(
-                            context,
-                            account.account!!,
-                            "oauth2:https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.appdata"
-                        )
-                        if (!token.isNullOrBlank()) {
-                            withContext(Dispatchers.Main) {
-                                isGoogleConnected = true
-                                connectedEmail = account.email.orEmpty()
-                                prefs.edit().putBoolean("is_connected", true).putString("connected_email", connectedEmail).apply()
-                                Toast.makeText(context, "Google Drive Connected ($connectedEmail)!", Toast.LENGTH_SHORT).show()
-                            }
-                        } else {
-                            withContext(Dispatchers.Main) {
-                                Toast.makeText(context, "Google Drive Sign-In failed: Token missing", Toast.LENGTH_LONG).show()
-                            }
-                        }
-                    } catch (e: Exception) {
-                        withContext(Dispatchers.Main) {
-                            Toast.makeText(context, "Google Drive Sign-In error: ${e.message}", Toast.LENGTH_LONG).show()
-                        }
-                    }
+            var res = authorizeDriveResult(context, DRIVE_SCOPES_FULL)
+            if (res.isFailure) {
+                res = authorizeDriveResult(context, DRIVE_SCOPES_APPDATA)
+            }
+            val authResult = res.getOrNull()
+            if (authResult != null && !authResult.hasResolution() && !authResult.accessToken.isNullOrBlank()) {
+                handleVerifiedToken(authResult.accessToken!!, showSuccessToast = showStatusToast)
+                if (showStatusToast && isGoogleConnected) {
+                    Toast.makeText(context, "Connection Verified ($connectedEmail)", Toast.LENGTH_SHORT).show()
+                }
+            } else {
+                clearLocalConnectionState()
+                if (showStatusToast) {
+                    Toast.makeText(context, "Google Drive সংযুক্ত নয় (Not Connected)", Toast.LENGTH_SHORT).show()
                 }
             }
         } catch (e: Exception) {
-            // Fallback to AccountManager AccountPicker on error 10 / DEVELOPER_ERROR
+            clearLocalConnectionState()
+            if (showStatusToast) {
+                Toast.makeText(context, "Connection check failed: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+        } finally {
+            isCheckingConnection = false
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        runSilentConnectionTest(showStatusToast = false)
+    }
+
+    // Launcher for official Google OAuth Consent Screen / Account Chooser
+    val authResolutionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartIntentSenderForResult()
+    ) { activityResult ->
+        if (activityResult.resultCode == Activity.RESULT_OK && activityResult.data != null) {
+            scope.launch {
+                isConnecting = true
+                try {
+                    val activity = context.findActivity()
+                    val client = if (activity != null) {
+                        Identity.getAuthorizationClient(activity)
+                    } else {
+                        Identity.getAuthorizationClient(context)
+                    }
+                    val authResult = client.getAuthorizationResultFromIntent(activityResult.data)
+                    val token = authResult.accessToken
+                    if (!token.isNullOrBlank()) {
+                        handleVerifiedToken(token, showSuccessToast = true)
+                    } else {
+                        clearLocalConnectionState()
+                        connectionError = "Google কোন Access Token দেয়নি (Not Connected)"
+                        Toast.makeText(context, connectionError, Toast.LENGTH_LONG).show()
+                    }
+                } catch (e: ApiException) {
+                    clearLocalConnectionState()
+                    val msg = "Google Sign-In failed (${e.statusCode}): ${e.localizedMessage ?: "Permission denied"}"
+                    connectionError = msg
+                    Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                } catch (e: Exception) {
+                    clearLocalConnectionState()
+                    val msg = "Google Sign-In error: ${e.localizedMessage ?: "Unknown"}"
+                    connectionError = msg
+                    Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                } finally {
+                    isConnecting = false
+                }
+            }
+        } else {
+            isConnecting = false
+            clearLocalConnectionState()
+            connectionError = "গুগল ড্রাইভ অনুমতি বাতিল করা হয়েছে (Not Connected)"
+            Toast.makeText(context, connectionError, Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun startInteractiveDriveConnect() {
+        if (isConnecting) return
+        isConnecting = true
+        connectionError = null
+        scope.launch {
             try {
-                val intent = AccountManager.newChooseAccountIntent(
-                    null, null, arrayOf("com.google"), null, null, null, null
-                )
-                accountPickerLauncher.launch(intent)
-            } catch (ex: Exception) {
-                Toast.makeText(context, "Google Sign-In failed: ${ex.message}", Toast.LENGTH_SHORT).show()
+                var result = authorizeDriveResult(context, DRIVE_SCOPES_FULL)
+                if (result.isFailure) {
+                    result = authorizeDriveResult(context, DRIVE_SCOPES_APPDATA)
+                }
+
+                result.onSuccess { authResult ->
+                    if (authResult.hasResolution() && authResult.pendingIntent != null) {
+                        authResolutionLauncher.launch(
+                            IntentSenderRequest.Builder(authResult.pendingIntent!!.intentSender).build()
+                        )
+                    } else if (!authResult.accessToken.isNullOrBlank()) {
+                        handleVerifiedToken(authResult.accessToken!!, showSuccessToast = true)
+                        isConnecting = false
+                    } else {
+                        clearLocalConnectionState()
+                        isConnecting = false
+                        connectionError = "Google OAuth consent পাওয়া যায়নি"
+                        Toast.makeText(context, connectionError, Toast.LENGTH_LONG).show()
+                    }
+                }.onFailure { err ->
+                    isConnecting = false
+                    clearLocalConnectionState()
+                    val codeStr = if (err is ApiException) " (${err.statusCode})" else ""
+                    val msg = "Google Drive Connect ব্যর্থ$codeStr: ${err.localizedMessage ?: "Configuration error"}"
+                    connectionError = msg
+                    Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                }
+            } catch (e: Exception) {
+                isConnecting = false
+                clearLocalConnectionState()
+                val msg = "Google Drive Connect ত্রুটি: ${e.localizedMessage}"
+                connectionError = msg
+                Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    fun disconnectGoogleDrive() {
+        val tokenToRevoke = activeAccessToken
+        scope.launch(Dispatchers.IO) {
+            try {
+                if (!tokenToRevoke.isNullOrBlank()) {
+                    val client = OkHttpClient()
+                    val req = Request.Builder()
+                        .url("https://oauth2.googleapis.com/revoke?token=$tokenToRevoke")
+                        .post("".toRequestBody("application/x-www-form-urlencoded".toMediaType()))
+                        .build()
+                    client.newCall(req).execute().close()
+                }
+            } catch (_: Exception) {
+            }
+            withContext(Dispatchers.Main) {
+                try {
+                    val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN).build()
+                    val gsiClient = GoogleSignIn.getClient(context, gso)
+                    gsiClient.revokeAccess()
+                    gsiClient.signOut()
+                } catch (_: Exception) {
+                }
+                clearLocalConnectionState()
+                connectionError = null
+                Toast.makeText(context, "Google Drive Disconnected & Revoked", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -258,6 +428,7 @@ fun BackupScreen(
         val feesArray = JSONArray()
         fees.forEach { f ->
             feesArray.put(JSONObject().apply {
+                put("id", f.id)
                 put("studentId", f.studentId)
                 put("amount", f.amount)
                 put("type", f.type)
@@ -277,6 +448,7 @@ fun BackupScreen(
                 })
             }
             resultsArray.put(JSONObject().apply {
+                put("id", r.id)
                 put("studentId", r.studentId)
                 put("exam", r.exam)
                 put("subjects", subjectsArr)
@@ -290,6 +462,7 @@ fun BackupScreen(
         val teachersArray = JSONArray()
         teachers.forEach { t ->
             teachersArray.put(JSONObject().apply {
+                put("id", t.id)
                 put("name", t.name)
                 put("subject", t.subject)
                 put("salary", t.salary)
@@ -304,6 +477,7 @@ fun BackupScreen(
         val teacherPaymentsArray = JSONArray()
         teacherPayments.forEach { tp ->
             teacherPaymentsArray.put(JSONObject().apply {
+                put("id", tp.id)
                 put("teacherId", tp.teacherId)
                 put("amount", tp.amount)
                 put("month", tp.month)
@@ -317,6 +491,7 @@ fun BackupScreen(
         val expensesArray = JSONArray()
         expenses.forEach { e ->
             expensesArray.put(JSONObject().apply {
+                put("id", e.id)
                 put("type", e.type)
                 put("desc", e.desc)
                 put("amount", e.amount)
@@ -328,6 +503,7 @@ fun BackupScreen(
         val noticesArray = JSONArray()
         notices.forEach { n ->
             noticesArray.put(JSONObject().apply {
+                put("id", n.id)
                 put("title", n.title)
                 put("description", n.description)
                 put("date", n.date)
@@ -338,23 +514,31 @@ fun BackupScreen(
         return root.toString(2)
     }
 
-    suspend fun uploadToGoogleDrive(jsonContent: String): Boolean {
+    suspend fun getFreshAccessToken(): String? {
+        var res = authorizeDriveResult(context, DRIVE_SCOPES_FULL)
+        if (res.isFailure) res = authorizeDriveResult(context, DRIVE_SCOPES_APPDATA)
+        val authRes = res.getOrNull()
+        val token = if (authRes != null && !authRes.hasResolution()) authRes.accessToken else activeAccessToken
+        if (!token.isNullOrBlank()) {
+            activeAccessToken = token
+        }
+        return token
+    }
+
+    suspend fun uploadToGoogleDrive(jsonContent: String): Result<String> {
         return withContext(Dispatchers.IO) {
             try {
-                val account = GoogleSignIn.getLastSignedInAccount(context)
-                val targetEmail = account?.email ?: connectedEmail
-                val acc = if (account?.account != null) account.account!! else Account(targetEmail, "com.google")
-
-                val token = GoogleAuthUtil.getToken(
-                    context,
-                    acc,
-                    "oauth2:https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.appdata"
-                ) ?: return@withContext false
+                val token = getFreshAccessToken()
+                    ?: return@withContext Result.failure(Exception("Valid Google Drive token not available"))
 
                 val client = OkHttpClient()
                 val mediaTypeJson = "application/json; charset=utf-8".toMediaType()
+                val dateSuffix = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+                val fileName = "MadrasaMPro_Backup_$dateSuffix.json"
 
-                // 1. Find or create folder "Madrasa M PRO"
+                // Step 1: Try visible folder "Madrasa M PRO" (if drive.file granted)
+                var parentId: String? = null
+                var targetLabel = "Madrasa M PRO"
                 val searchUrl = "https://www.googleapis.com/drive/v3/files?q=name='Madrasa M PRO' and mimeType='application/vnd.google-apps.folder' and trashed=false"
                 val searchReq = Request.Builder()
                     .url(searchUrl)
@@ -363,62 +547,143 @@ fun BackupScreen(
                     .build()
 
                 val searchRes = client.newCall(searchReq).execute()
-                var folderId: String? = null
                 if (searchRes.isSuccessful) {
                     val bodyStr = searchRes.body?.string().orEmpty()
-                    val json = JSONObject(bodyStr)
-                    val files = json.optJSONArray("files")
+                    val files = JSONObject(bodyStr).optJSONArray("files")
                     if (files != null && files.length() > 0) {
-                        folderId = files.getJSONObject(0).optString("id")
+                        parentId = files.getJSONObject(0).optString("id")
+                    } else {
+                        val folderMeta = JSONObject().apply {
+                            put("name", "Madrasa M PRO")
+                            put("mimeType", "application/vnd.google-apps.folder")
+                        }
+                        val createReq = Request.Builder()
+                            .url("https://www.googleapis.com/drive/v3/files")
+                            .addHeader("Authorization", "Bearer $token")
+                            .post(folderMeta.toString().toRequestBody(mediaTypeJson))
+                            .build()
+                        val createRes = client.newCall(createReq).execute()
+                        if (createRes.isSuccessful) {
+                            parentId = JSONObject(createRes.body?.string().orEmpty()).optString("id")
+                        }
                     }
                 }
 
-                if (folderId.isNullOrBlank()) {
-                    val createFolderUrl = "https://www.googleapis.com/drive/v3/files"
-                    val folderMeta = JSONObject().apply {
-                        put("name", "Madrasa M PRO")
-                        put("mimeType", "application/vnd.google-apps.folder")
-                    }
-                    val createReq = Request.Builder()
-                        .url(createFolderUrl)
-                        .addHeader("Authorization", "Bearer $token")
-                        .addHeader("Content-Type", "application/json")
-                        .post(folderMeta.toString().toRequestBody(mediaTypeJson))
-                        .build()
-                    val createRes = client.newCall(createReq).execute()
-                    if (createRes.isSuccessful) {
-                        val createBody = createRes.body?.string().orEmpty()
-                        folderId = JSONObject(createBody).optString("id")
-                    }
+                // Fallback to appDataFolder if only drive.appdata scope was granted
+                if (parentId.isNullOrBlank()) {
+                    parentId = "appDataFolder"
+                    targetLabel = "Google Drive AppData"
                 }
 
-                if (folderId.isNullOrBlank()) return@withContext false
-
-                // 2. Upload file
-                val dateSuffix = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
-                val fileName = "MadrasaMPro_Backup_$dateSuffix.json"
-                val uploadUrl = "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart"
+                // Step 2: Upload JSON file
                 val metadata = JSONObject().apply {
                     put("name", fileName)
-                    put("parents", JSONArray().put(folderId))
+                    put("parents", JSONArray().put(parentId))
                 }
-
                 val requestBody = MultipartBody.Builder()
                     .setType(MultipartBody.FORM)
-                    .addFormDataPart("metadata", null, metadata.toString().toRequestBody("application/json; charset=UTF-8".toMediaType()))
-                    .addFormDataPart("file", fileName, jsonContent.toRequestBody("application/json; charset=UTF-8".toMediaType()))
+                    .addFormDataPart(
+                        "metadata",
+                        null,
+                        metadata.toString().toRequestBody("application/json; charset=UTF-8".toMediaType())
+                    )
+                    .addFormDataPart(
+                        "file",
+                        fileName,
+                        jsonContent.toRequestBody("application/json; charset=UTF-8".toMediaType())
+                    )
                     .build()
 
                 val uploadReq = Request.Builder()
-                    .url(uploadUrl)
+                    .url("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart")
                     .addHeader("Authorization", "Bearer $token")
                     .post(requestBody)
                     .build()
 
                 val uploadRes = client.newCall(uploadReq).execute()
-                uploadRes.isSuccessful
+                val uploadBody = uploadRes.body?.string().orEmpty()
+                if (uploadRes.isSuccessful) {
+                    Result.success(targetLabel)
+                } else {
+                    val apiMsg = try {
+                        JSONObject(uploadBody).optJSONObject("error")?.optString("message") ?: "HTTP ${uploadRes.code}"
+                    } catch (_: Exception) {
+                        "HTTP ${uploadRes.code}"
+                    }
+                    Result.failure(Exception(apiMsg))
+                }
             } catch (e: Exception) {
-                false
+                Result.failure(e)
+            }
+        }
+    }
+
+    suspend fun listDriveBackups(): Result<List<DriveBackupEntry>> {
+        return withContext(Dispatchers.IO) {
+            try {
+                val token = getFreshAccessToken()
+                    ?: return@withContext Result.failure(Exception("Token expired"))
+                val client = OkHttpClient()
+                val collected = mutableListOf<DriveBackupEntry>()
+
+                // Query visible drive.file files + appDataFolder files
+                val urls = listOf(
+                    "https://www.googleapis.com/drive/v3/files?q=name contains 'MadrasaMPro_Backup_' and trashed=false&fields=files(id,name,modifiedTime,size)&orderBy=modifiedTime desc",
+                    "https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=trashed=false&fields=files(id,name,modifiedTime,size)&orderBy=modifiedTime desc"
+                )
+                for (u in urls) {
+                    val req = Request.Builder()
+                        .url(u)
+                        .addHeader("Authorization", "Bearer $token")
+                        .get()
+                        .build()
+                    val res = client.newCall(req).execute()
+                    if (res.isSuccessful) {
+                        val arr = JSONObject(res.body?.string().orEmpty()).optJSONArray("files")
+                        if (arr != null) {
+                            for (i in 0 until arr.length()) {
+                                val f = arr.getJSONObject(i)
+                                val id = f.optString("id")
+                                if (collected.none { it.id == id }) {
+                                    collected.add(
+                                        DriveBackupEntry(
+                                            id = id,
+                                            name = f.optString("name", "Backup.json"),
+                                            modifiedTime = f.optString("modifiedTime", ""),
+                                            sizeBytes = f.optString("size", "0").toLongOrNull() ?: 0L
+                                        )
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                Result.success(collected)
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
+        }
+    }
+
+    suspend fun downloadAndRestoreDriveFile(fileId: String): Result<Int> {
+        return withContext(Dispatchers.IO) {
+            try {
+                val token = getFreshAccessToken()
+                    ?: return@withContext Result.failure(Exception("Token expired"))
+                val client = OkHttpClient()
+                val req = Request.Builder()
+                    .url("https://www.googleapis.com/drive/v3/files/$fileId?alt=media")
+                    .addHeader("Authorization", "Bearer $token")
+                    .get()
+                    .build()
+                val res = client.newCall(req).execute()
+                val body = res.body?.string().orEmpty()
+                if (!res.isSuccessful) {
+                    return@withContext Result.failure(Exception("Download failed: HTTP ${res.code}"))
+                }
+                viewModel.restoreFromBackupJson(body)
+            } catch (e: Exception) {
+                Result.failure(e)
             }
         }
     }
@@ -427,15 +692,47 @@ fun BackupScreen(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
         if (uri != null) {
-            try {
-                context.contentResolver.openInputStream(uri)?.use { input ->
-                    val jsonStr = input.bufferedReader().use { it.readText() }
-                    val root = JSONObject(jsonStr)
-                    val inst = root.optString("institution", "")
-                    Toast.makeText(context, "Backup restored successfully from Google Drive ($inst)!", Toast.LENGTH_LONG).show()
+            scope.launch {
+                try {
+                    val jsonStr = withContext(Dispatchers.IO) {
+                        context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+                    }
+                    if (jsonStr.isNullOrBlank()) {
+                        Toast.makeText(context, "ফাইলটি খালি বা পড়া যাচ্ছে না", Toast.LENGTH_SHORT).show()
+                        return@launch
+                    }
+                    val res = viewModel.restoreFromBackupJson(jsonStr)
+                    res.onSuccess { count ->
+                        Toast.makeText(
+                            context,
+                            "সফলভাবে $count টি তথ্য রিস্টোর সম্পন্ন হয়েছে!",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }.onFailure { err ->
+                        Toast.makeText(context, "রিস্টোর ত্রুটি: ${err.message}", Toast.LENGTH_LONG).show()
+                    }
+                } catch (e: Exception) {
+                    Toast.makeText(context, "রিস্টোরে ত্রুটি: ${e.message}", Toast.LENGTH_SHORT).show()
                 }
+            }
+        }
+    }
+
+    val saveDriveJsonLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json")
+    ) { targetUri ->
+        if (targetUri != null) {
+            try {
+                val jsonString = createBackupJson()
+                context.contentResolver.openOutputStream(targetUri)?.use { output ->
+                    output.write(jsonString.toByteArray(Charsets.UTF_8))
+                }
+                val timeNow = SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.getDefault()).format(Date())
+                lastBackupTime = timeNow
+                prefs.edit().putString("last_backup_time", timeNow).apply()
+                Toast.makeText(context, "Local Backup Successful!", Toast.LENGTH_LONG).show()
             } catch (e: Exception) {
-                Toast.makeText(context, "রিষ্টোরে ত্রুটি: ${e.message}", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "সংরক্ষণে ত্রুটি: ${e.message}", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -461,22 +758,30 @@ fun BackupScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f)
+                    ) {
                         Box(
                             modifier = Modifier
-                                .size(40.dp)
+                                .size(42.dp)
                                 .clip(CircleShape)
-                                .background(if (isGoogleConnected) MadrasaGreen.copy(alpha = 0.15f) else MaterialTheme.colorScheme.primaryContainer),
+                                .background(
+                                    when {
+                                        isGoogleConnected -> MadrasaGreen.copy(alpha = 0.16f)
+                                        else -> MaterialTheme.colorScheme.primaryContainer
+                                    }
+                                ),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
-                                imageVector = if (isGoogleConnected) Icons.Default.CloudDone else Icons.Default.Login,
+                                imageVector = if (isGoogleConnected) Icons.Default.CloudDone else Icons.Default.CloudOff,
                                 contentDescription = null,
                                 tint = if (isGoogleConnected) MadrasaGreen else MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.size(22.dp)
                             )
                         }
-                        Spacer(modifier = Modifier.width(10.dp))
+                        Spacer(modifier = Modifier.width(12.dp))
                         Column {
                             Text(
                                 text = "Google Drive Connect",
@@ -485,70 +790,66 @@ fun BackupScreen(
                                 color = MaterialTheme.colorScheme.primary
                             )
                             Text(
-                                text = if (isCheckingConnection) "সংযোগ যাচাই করা হচ্ছে..." else if (isGoogleConnected) "সংযুক্ত: $connectedEmail" else "গুগল ড্রাইভ সিঙ্ক নিষ্ক্রিয়",
+                                text = when {
+                                    isCheckingConnection -> "সংযোগ যাচাই করা হচ্ছে..."
+                                    isGoogleConnected -> "সংযুক্ত: $connectedEmail"
+                                    else -> "সংযুক্ত নয় (Not Connected)"
+                                },
                                 fontSize = 12.sp,
+                                fontWeight = if (isGoogleConnected) FontWeight.SemiBold else FontWeight.Normal,
                                 color = if (isGoogleConnected) MadrasaGreen else MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
 
-                    if (!isGoogleConnected) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Button(
-                                onClick = {
-                                    try {
-                                        val signInIntent = googleSignInClient.signInIntent
-                                        signInLauncher.launch(signInIntent)
-                                    } catch (_: Exception) {
-                                        val intent = AccountManager.newChooseAccountIntent(
-                                            null, null, arrayOf("com.google"), null, null, null, null
-                                        )
-                                        accountPickerLauncher.launch(intent)
-                                    }
-                                },
-                                colors = ButtonDefaults.buttonColors(containerColor = MadrasaPrimary),
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier.testTag("google_login_button")
-                            ) {
-                                Text("Login", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                            }
-                            OutlinedButton(
-                                onClick = {
-                                    try {
-                                        restoreJsonLauncher.launch(arrayOf("application/json", "*/*"))
-                                    } catch (_: Exception) {
-                                        Toast.makeText(context, "Restore launcher error", Toast.LENGTH_SHORT).show()
-                                    }
-                                },
-                                shape = RoundedCornerShape(8.dp)
-                            ) {
-                                Text("রিস্টোর", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            }
-                        }
-                    } else {
-                        OutlinedButton(
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(
                             onClick = {
-                                try {
-                                    googleSignInClient.signOut()
-                                    googleSignInClient.revokeAccess()
-                                } catch (_: Exception) {}
-                                isGoogleConnected = false
-                                connectedEmail = ""
-                                prefs.edit().putBoolean("is_connected", false).remove("connected_email").apply()
-                                Toast.makeText(context, "Google Drive Disconnected", Toast.LENGTH_SHORT).show()
+                                scope.launch { runSilentConnectionTest(showStatusToast = true) }
                             },
-                            shape = RoundedCornerShape(8.dp)
+                            enabled = !isCheckingConnection
                         ) {
-                            Text("Disconnect", fontSize = 11.sp, color = MadrasaAccent)
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = "Test Connection",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        if (isGoogleConnected) {
+                            OutlinedButton(
+                                onClick = { disconnectGoogleDrive() },
+                                shape = RoundedCornerShape(8.dp),
+                                border = BorderStroke(1.dp, MadrasaRed.copy(alpha = 0.6f)),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                            ) {
+                                Text("Disconnect", fontSize = 11.5.sp, color = MadrasaRed, fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
                 }
 
-                if (isGoogleConnected) {
-                    Spacer(modifier = Modifier.height(14.dp))
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
-                    Spacer(modifier = Modifier.height(14.dp))
+                if (!connectionError.isNullOrBlank()) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Surface(
+                        color = MadrasaRed.copy(alpha = 0.12f),
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, MadrasaRed.copy(alpha = 0.35f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = connectionError!!,
+                            color = MadrasaRed,
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(10.dp)
+                        )
+                    }
+                }
 
+                Spacer(modifier = Modifier.height(14.dp))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
+                Spacer(modifier = Modifier.height(14.dp))
+
+                if (isGoogleConnected) {
                     Text(
                         text = "ফোল্ডার: Google Drive / Madrasa M PRO",
                         fontSize = 12.5.sp,
@@ -562,34 +863,106 @@ fun BackupScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
 
-                    Spacer(modifier = Modifier.height(12.dp))
-
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(
+                        text = "অটো ব্যাকআপ সময়সূচী:",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
+                        listOf("প্রতিদিন", "প্রতি সপ্তাহে", "বন্ধ").forEach { freq ->
+                            FilterChip(
+                                selected = autoBackupFreq == freq,
+                                onClick = {
+                                    autoBackupFreq = freq
+                                    prefs.edit().putString("auto_backup_freq", freq).apply()
+                                    Toast.makeText(context, "অটো ব্যাকআপ: $freq সেট করা হয়েছে", Toast.LENGTH_SHORT).show()
+                                },
+                                label = { Text(freq, fontSize = 12.sp) }
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+                } else {
+                    Text(
+                        text = "গুগল ড্রাইভে নিরাপদ ক্লাউড ব্যাকআপ রাখতে Google Login করুন অথবা আগের ব্যাকআপ ফাইল থেকে রিস্টোর করুন।",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                }
+
+                // Side-by-side Primary Action Row (Clean spacing & crisp high-contrast colors)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    if (!isGoogleConnected) {
+                        Button(
+                            onClick = { startInteractiveDriveConnect() },
+                            enabled = !isConnecting && !isCheckingConnection,
+                            modifier = Modifier
+                                .weight(1f)
+                                .heightIn(min = 48.dp)
+                                .testTag("google_login_button"),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MadrasaPrimary,
+                                contentColor = Color.White,
+                                disabledContainerColor = MadrasaPrimary.copy(alpha = 0.55f),
+                                disabledContentColor = Color.White.copy(alpha = 0.85f)
+                            ),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            if (isConnecting) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(18.dp),
+                                    color = Color.White,
+                                    strokeWidth = 2.dp
+                                )
+                            } else {
+                                Icon(Icons.Default.Login, contentDescription = null, modifier = Modifier.size(18.dp))
+                            }
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = if (isConnecting) "Connecting..." else "Google Login",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    } else {
                         Button(
                             onClick = {
                                 if (isUploading) return@Button
                                 isUploading = true
+                                connectionError = null
                                 scope.launch {
                                     try {
                                         val jsonString = createBackupJson()
-                                        val success = uploadToGoogleDrive(jsonString)
-                                        if (success) {
+                                        val uploadResult = uploadToGoogleDrive(jsonString)
+                                        uploadResult.onSuccess { folderLabel ->
                                             val timeNow = SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.getDefault()).format(Date())
                                             lastBackupTime = timeNow
                                             prefs.edit().putString("last_backup_time", timeNow).apply()
                                             Toast.makeText(
                                                 context,
-                                                "Backup Successful! Google Drive এর 'Madrasa M PRO' ফোল্ডারে আপলোড হয়েছে ($timeNow)",
+                                                "Backup Successful! $folderLabel-এ আপলোড হয়েছে ($timeNow)",
                                                 Toast.LENGTH_LONG
                                             ).show()
-                                        } else {
-                                            Toast.makeText(context, "Drive Backup Error: Upload failed or permission denied", Toast.LENGTH_LONG).show()
+                                        }.onFailure { err ->
+                                            val msg = "Drive Backup Failed: ${err.message}"
+                                            connectionError = msg
+                                            Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
                                         }
                                     } catch (e: Exception) {
-                                        Toast.makeText(context, "Drive Backup Error: ${e.message}", Toast.LENGTH_LONG).show()
+                                        val msg = "Drive Backup Error: ${e.message}"
+                                        connectionError = msg
+                                        Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
                                     } finally {
                                         isUploading = false
                                     }
@@ -598,39 +971,70 @@ fun BackupScreen(
                             enabled = !isUploading,
                             modifier = Modifier
                                 .weight(1f)
-                                .heightIn(min = 46.dp)
+                                .heightIn(min = 48.dp)
                                 .testTag("drive_backup_now_button"),
-                            colors = ButtonDefaults.buttonColors(containerColor = MadrasaPrimary),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MadrasaPrimary,
+                                contentColor = Color.White,
+                                disabledContainerColor = MadrasaPrimary.copy(alpha = 0.55f),
+                                disabledContentColor = Color.White.copy(alpha = 0.85f)
+                            ),
                             shape = RoundedCornerShape(10.dp)
                         ) {
                             if (isUploading) {
-                                CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(18.dp),
+                                    color = Color.White,
+                                    strokeWidth = 2.dp
+                                )
                             } else {
                                 Icon(Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(18.dp))
                             }
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text(if (isUploading) "Uploading..." else "Backup to Drive", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            Text(
+                                text = if (isUploading) "Uploading..." else "Backup to Drive",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
                         }
+                    }
 
-                        Button(
-                            onClick = {
+                    Button(
+                        onClick = {
+                            if (isGoogleConnected) {
+                                isLoadingDriveFiles = true
+                                showDriveRestoreDialog = true
+                                scope.launch {
+                                    val res = listDriveBackups()
+                                    res.onSuccess { list ->
+                                        driveBackups = list
+                                    }.onFailure { err ->
+                                        driveBackups = emptyList()
+                                        Toast.makeText(context, "Drive list error: ${err.message}", Toast.LENGTH_SHORT).show()
+                                    }
+                                    isLoadingDriveFiles = false
+                                }
+                            } else {
                                 try {
                                     restoreJsonLauncher.launch(arrayOf("application/json", "*/*"))
                                 } catch (_: Exception) {
                                     Toast.makeText(context, "Restore launcher error", Toast.LENGTH_SHORT).show()
                                 }
-                            },
-                            modifier = Modifier
-                                .weight(1f)
-                                .heightIn(min = 46.dp)
-                                .testTag("drive_restore_button"),
-                            colors = ButtonDefaults.buttonColors(containerColor = MadrasaAccent),
-                            shape = RoundedCornerShape(10.dp)
-                        ) {
-                            Icon(Icons.Default.CloudDownload, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("রিস্টোর (Restore)", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        }
+                            }
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .heightIn(min = 48.dp)
+                            .testTag("drive_restore_button"),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MadrasaAccent,
+                            contentColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Icon(Icons.Default.CloudDownload, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("রিস্টোর (Restore)", fontSize = 13.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -661,29 +1065,8 @@ fun BackupScreen(
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    val saveDriveJsonLauncher = rememberLauncherForActivityResult(
-                        contract = ActivityResultContracts.CreateDocument("application/json")
-                    ) { targetUri ->
-                        if (targetUri != null) {
-                            try {
-                                val jsonString = createBackupJson()
-                                context.contentResolver.openOutputStream(targetUri)?.use { output ->
-                                    output.write(jsonString.toByteArray(Charsets.UTF_8))
-                                }
-                                val timeNow = SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.getDefault()).format(Date())
-                                lastBackupTime = timeNow
-                                prefs.edit().putString("last_backup_time", timeNow).apply()
-                                Toast.makeText(context, "Local Backup Successful!", Toast.LENGTH_LONG).show()
-                            } catch (e: Exception) {
-                                Toast.makeText(context, "সংরক্ষণে ত্রুটি: ${e.message}", Toast.LENGTH_SHORT).show()
-                            }
-                        }
-                    }
-
-    // Local Export & Share Action
-    // ...
                     Button(
                         onClick = {
                             val dateSuffix = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
@@ -691,13 +1074,16 @@ fun BackupScreen(
                         },
                         modifier = Modifier
                             .weight(1f)
-                            .heightIn(min = 44.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = MadrasaPrimary),
+                            .heightIn(min = 48.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MadrasaPrimary,
+                            contentColor = Color.White
+                        ),
                         shape = RoundedCornerShape(10.dp)
                     ) {
                         Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Export JSON", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Export JSON", fontSize = 13.sp, fontWeight = FontWeight.Bold)
                     }
 
                     Button(
@@ -726,13 +1112,16 @@ fun BackupScreen(
                         },
                         modifier = Modifier
                             .weight(1f)
-                            .heightIn(min = 44.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = MadrasaAccent),
+                            .heightIn(min = 48.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MadrasaAccent,
+                            contentColor = Color.White
+                        ),
                         shape = RoundedCornerShape(10.dp)
                     ) {
                         Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Share Backup", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Share Backup", fontSize = 13.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -757,11 +1146,104 @@ fun BackupScreen(
                 BackupStatRow(label = "মোট ছাত্র-ছাত্রী:", count = "${students.size} জন")
                 BackupStatRow(label = "মোট ফি আদায়ের রশিদ:", count = "${fees.size} টি")
                 BackupStatRow(label = "সংরক্ষিত পরীক্ষার রেজাল্ট:", count = "${results.size} টি")
-                BackupStatRow(label = "শিক্ষক_সংখ্যা:", count = "${teachers.size} জন")
+                BackupStatRow(label = "শিক্ষক সংখ্যা:", count = "${teachers.size} জন")
                 BackupStatRow(label = "খরচ ও দানের এন্ট্রি:", count = "${expenses.size} টি")
-                BackupStatRow(label = "নোটিশ_সংখ্যা:", count = "${notices.size} টি")
+                BackupStatRow(label = "নোটিশ সংখ্যা:", count = "${notices.size} টি")
             }
         }
+    }
+
+    if (showDriveRestoreDialog) {
+        AlertDialog(
+            onDismissRequest = { showDriveRestoreDialog = false },
+            title = { Text("গুগল ড্রাইভ থেকে রিস্টোর", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (isLoadingDriveFiles) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                            Text("ড্রাইভ ব্যাকআপ তালিকা খোঁজা হচ্ছে...", fontSize = 13.sp)
+                        }
+                    } else if (driveBackups.isEmpty()) {
+                        Text(
+                            "Google Drive-এ এখনো কোন ব্যাকআপ পাওয়া যায়নি। আপনি ফোনের স্টোরেজ থেকেও JSON ফাইল রিস্টোর করতে পারেন।",
+                            fontSize = 13.sp
+                        )
+                    } else {
+                        Text("রিস্টোর করতে একটি ব্যাকআপ সিলেক্ট করুন:", fontSize = 13.sp)
+                        driveBackups.take(5).forEach { entry ->
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        showDriveRestoreDialog = false
+                                        scope.launch {
+                                            val res = downloadAndRestoreDriveFile(entry.id)
+                                            res.onSuccess { count ->
+                                                Toast.makeText(
+                                                    context,
+                                                    "Drive থেকে $count টি তথ্য সফলভাবে রিস্টোর হয়েছে!",
+                                                    Toast.LENGTH_LONG
+                                                ).show()
+                                            }.onFailure { err ->
+                                                Toast.makeText(
+                                                    context,
+                                                    "রিস্টোর ব্যর্থ: ${err.message}",
+                                                    Toast.LENGTH_LONG
+                                                ).show()
+                                            }
+                                        }
+                                    }
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        Icons.Default.Restore,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Column {
+                                        Text(entry.name, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
+                                        Text(
+                                            "${entry.modifiedTime.take(19).replace('T', ' ')} • ${entry.sizeBytes / 1024} KB",
+                                            fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showDriveRestoreDialog = false
+                        restoreJsonLauncher.launch(arrayOf("application/json", "*/*"))
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MadrasaAccent,
+                        contentColor = Color.White
+                    )
+                ) {
+                    Text("ফোন থেকে ফাইল নিন", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDriveRestoreDialog = false }) {
+                    Text("বন্ধ করুন")
+                }
+            }
+        )
     }
 }
 
@@ -774,7 +1256,16 @@ fun BackupStatRow(label: String, count: String) {
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(text = label, fontSize = 13.sp, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f))
-        Text(text = count, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+        Text(
+            text = label,
+            fontSize = 13.sp,
+            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f)
+        )
+        Text(
+            text = count,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.primary
+        )
     }
 }

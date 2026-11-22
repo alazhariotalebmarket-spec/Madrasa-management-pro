@@ -318,4 +318,170 @@ class MadrasaViewModel(application: Application) : AndroidViewModel(application)
             else -> "F"
         }
     }
+
+    suspend fun restoreFromBackupJson(jsonStr: String): Result<Int> {
+        return try {
+            val root = org.json.JSONObject(jsonStr)
+            var restoredCount = 0
+
+            val instName = root.optString("institution", "")
+            val instAddr = root.optString("institutionAddress", "")
+            val instPhone = root.optString("institutionPhone", "")
+            if (instName.isNotBlank()) {
+                updateMadrasaInfo(
+                    name = instName,
+                    address = instAddr.ifBlank { madrasaInfo.value.address },
+                    phone = instPhone.ifBlank { madrasaInfo.value.phone }
+                )
+            }
+
+            val studentsArr = root.optJSONArray("students")
+            if (studentsArr != null) {
+                for (i in 0 until studentsArr.length()) {
+                    val o = studentsArr.getJSONObject(i)
+                    repository.insertStudent(
+                        StudentEntity(
+                            id = o.optInt("id", 0),
+                            name = o.optString("name", ""),
+                            father = o.optString("father", ""),
+                            phone = o.optString("phone", ""),
+                            cls = o.optString("cls", ""),
+                            fee = o.optDouble("fee", 0.0),
+                            photoUri = o.optString("photoUri", ""),
+                            roll = o.optString("roll", ""),
+                            electricBill = o.optDouble("electricBill", 0.0)
+                        )
+                    )
+                    restoredCount++
+                }
+            }
+
+            val feesArr = root.optJSONArray("fees")
+            if (feesArr != null) {
+                for (i in 0 until feesArr.length()) {
+                    val o = feesArr.getJSONObject(i)
+                    repository.insertFee(
+                        FeeEntity(
+                            id = o.optInt("id", 0),
+                            studentId = o.optInt("studentId", 0),
+                            amount = o.optDouble("amount", 0.0),
+                            type = o.optString("type", "মাসিক বেতন"),
+                            month = o.optString("month", ""),
+                            date = o.optString("date", "")
+                        )
+                    )
+                    restoredCount++
+                }
+            }
+
+            val resultsArr = root.optJSONArray("results")
+            if (resultsArr != null) {
+                for (i in 0 until resultsArr.length()) {
+                    val o = resultsArr.getJSONObject(i)
+                    val subsArr = o.optJSONArray("subjects")
+                    val subList = mutableListOf<SubjectMark>()
+                    if (subsArr != null) {
+                        for (j in 0 until subsArr.length()) {
+                            val sObj = subsArr.getJSONObject(j)
+                            subList.add(
+                                SubjectMark(
+                                    name = sObj.optString("name", ""),
+                                    mark = sObj.optDouble("mark", 0.0)
+                                )
+                            )
+                        }
+                    }
+                    repository.insertResult(
+                        ResultEntity(
+                            id = o.optInt("id", 0),
+                            studentId = o.optInt("studentId", 0),
+                            exam = o.optString("exam", ""),
+                            subjectsJson = ResultEntity.serializeSubjects(subList),
+                            total = o.optDouble("total", 0.0),
+                            avg = o.optDouble("avg", 0.0),
+                            date = o.optString("date", "")
+                        )
+                    )
+                    restoredCount++
+                }
+            }
+
+            val teachersArr = root.optJSONArray("teachers")
+            if (teachersArr != null) {
+                for (i in 0 until teachersArr.length()) {
+                    val o = teachersArr.getJSONObject(i)
+                    repository.insertTeacher(
+                        TeacherEntity(
+                            id = o.optInt("id", 0),
+                            name = o.optString("name", ""),
+                            subject = o.optString("subject", ""),
+                            salary = o.optDouble("salary", 0.0),
+                            address = o.optString("address", ""),
+                            phone = o.optString("phone", ""),
+                            photoUri = o.optString("photoUri", ""),
+                            joinDate = o.optString("joinDate", "")
+                        )
+                    )
+                    restoredCount++
+                }
+            }
+
+            val tpArr = root.optJSONArray("teacherPayments")
+            if (tpArr != null) {
+                for (i in 0 until tpArr.length()) {
+                    val o = tpArr.getJSONObject(i)
+                    repository.insertTeacherPayment(
+                        TeacherPaymentEntity(
+                            id = o.optInt("id", 0),
+                            teacherId = o.optInt("teacherId", 0),
+                            amount = o.optDouble("amount", 0.0),
+                            month = o.optString("month", ""),
+                            year = o.optString("year", ""),
+                            date = o.optString("date", ""),
+                            note = o.optString("note", "")
+                        )
+                    )
+                    restoredCount++
+                }
+            }
+
+            val expArr = root.optJSONArray("expenses")
+            if (expArr != null) {
+                for (i in 0 until expArr.length()) {
+                    val o = expArr.getJSONObject(i)
+                    repository.insertExpense(
+                        ExpenseEntity(
+                            id = o.optInt("id", 0),
+                            type = o.optString("type", "খরচ"),
+                            desc = o.optString("desc", ""),
+                            amount = o.optDouble("amount", 0.0),
+                            date = o.optString("date", "")
+                        )
+                    )
+                    restoredCount++
+                }
+            }
+
+            val noticesArr = root.optJSONArray("notices")
+            if (noticesArr != null) {
+                for (i in 0 until noticesArr.length()) {
+                    val o = noticesArr.getJSONObject(i)
+                    repository.insertNotice(
+                        NoticeEntity(
+                            id = o.optInt("id", 0),
+                            title = o.optString("title", ""),
+                            description = o.optString("description", ""),
+                            date = o.optString("date", "")
+                        )
+                    )
+                    restoredCount++
+                }
+            }
+
+            Result.success(restoredCount)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
 }
+
