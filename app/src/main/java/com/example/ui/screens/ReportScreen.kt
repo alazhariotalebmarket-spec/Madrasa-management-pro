@@ -28,6 +28,7 @@ import com.example.ui.theme.MadrasaGreen
 import com.example.ui.theme.MadrasaPrimary
 import com.example.ui.theme.MadrasaRed
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ReportScreen(
     students: List<StudentEntity>,
@@ -35,6 +36,18 @@ fun ReportScreen(
     madrasaInfo: MadrasaInfo = MadrasaInfo()
 ) {
     val context = LocalContext.current
+
+    var selectedClassFilter by remember { mutableStateOf("সকল শ্রেণী") }
+    var expandedClassFilter by remember { mutableStateOf(false) }
+
+    val classesList = remember(students) {
+        listOf("সকল শ্রেণী") + students.map { it.cls }.distinct().filter { it.isNotBlank() }
+    }
+
+    val filteredStudents = remember(students, selectedClassFilter) {
+        val list = if (selectedClassFilter == "সকল শ্রেণী") students else students.filter { it.cls == selectedClassFilter }
+        list.sortedBy { s -> s.roll.toIntOrNull() ?: 9999 }
+    }
 
     LazyColumn(
         modifier = Modifier
@@ -51,35 +64,69 @@ fun ReportScreen(
                 elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text = "📊 মাসিক বাকি রিপোর্ট ও রিমাইন্ডার",
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "বকেয়া বেতন থাকলে অভিভাবককে সরাসরি কল বা এসএমএস করুন",
-                        fontSize = 13.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "📊 কল ও এসএমএস (শ্রেণী ও রোল অনুযায়ী)",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    ExposedDropdownMenuBox(
+                        expanded = expandedClassFilter,
+                        onExpandedChange = { expandedClassFilter = !expandedClassFilter },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        OutlinedTextField(
+                            value = selectedClassFilter,
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("শ্রেণী নির্বাচন করে ফিল্টার করুন") },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedClassFilter) },
+                            modifier = Modifier
+                                .menuAnchor()
+                                .fillMaxWidth(),
+                            shape = RoundedCornerShape(10.dp)
+                        )
+                        ExposedDropdownMenu(
+                            expanded = expandedClassFilter,
+                            onDismissRequest = { expandedClassFilter = false }
+                        ) {
+                            classesList.forEach { cls ->
+                                DropdownMenuItem(
+                                    text = { Text(cls) },
+                                    onClick = {
+                                        selectedClassFilter = cls
+                                        expandedClassFilter = false
+                                    }
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
 
-        if (students.isEmpty()) {
+        if (filteredStudents.isEmpty()) {
             item {
                 MadrasaEmptyState(
                     icon = Icons.Default.PeopleOutline,
                     title = "কোন ছাত্র পাওয়া যায়নি",
-                    subtitle = "ছাত্র ভর্তি করা হলে এখানে বকেয়া রিপোর্ট দেখা যাবে"
+                    subtitle = "এই শ্রেণীতে কোন ছাত্র ভর্তি করা হয়নি"
                 )
             }
         } else {
-            items(students) { student ->
+            items(filteredStudents, key = { it.id }) { student ->
                 val paidTotal = fees.filter { it.studentId == student.id }.sumOf { it.amount }
                 val due = maxOf(0.0, student.fee - paidTotal)
                 val isDue = due > 0
+                val rollStr = if (student.roll.isNotBlank()) "রোল: ${student.roll}" else "রোল: -"
 
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -99,7 +146,7 @@ fun ReportScreen(
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(text = student.name, fontWeight = FontWeight.Bold, fontSize = 15.5.sp)
                                 Text(
-                                    text = "${student.cls} • ফোন: ${student.phone.ifEmpty { "নেই" }} • ফি ${student.fee.toInt()}৳ • জমা ${paidTotal.toInt()}৳",
+                                    text = "${student.cls} • $rollStr • ফোন: ${student.phone.ifEmpty { "নেই" }}",
                                     fontSize = 12.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -119,7 +166,7 @@ fun ReportScreen(
                             }
                         }
 
-                        if (isDue && student.phone.isNotEmpty()) {
+                        if (student.phone.isNotBlank()) {
                             Spacer(modifier = Modifier.height(10.dp))
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -131,7 +178,7 @@ fun ReportScreen(
                                         val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:${student.phone}"))
                                         context.startActivity(intent)
                                     },
-                                    modifier = Modifier.heightIn(min = 42.dp),
+                                    modifier = Modifier.heightIn(min = 40.dp),
                                     shape = RoundedCornerShape(10.dp)
                                 ) {
                                     Icon(Icons.Default.Call, contentDescription = "Call", modifier = Modifier.size(16.dp))
@@ -149,7 +196,7 @@ fun ReportScreen(
                                         }
                                         context.startActivity(intent)
                                     },
-                                    modifier = Modifier.heightIn(min = 42.dp),
+                                    modifier = Modifier.heightIn(min = 40.dp),
                                     colors = ButtonDefaults.buttonColors(containerColor = MadrasaPrimary, contentColor = Color.White),
                                     shape = RoundedCornerShape(10.dp)
                                 ) {

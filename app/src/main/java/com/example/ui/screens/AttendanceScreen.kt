@@ -1,16 +1,21 @@
 package com.example.ui.screens
 
+import android.widget.Toast
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.FactCheck
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -28,10 +33,17 @@ fun AttendanceScreen(
     students: List<StudentEntity>,
     onSaveAttendance: (String, Map<Int, String>) -> Unit
 ) {
+    val context = LocalContext.current
     val todayStr = remember { SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date()) }
     var selectedDate by remember { mutableStateOf(todayStr) }
     val attendanceState = remember { mutableStateMapOf<Int, String>() }
-    var summaryText by remember { mutableStateOf("") }
+
+    var selectedClassFilter by remember { mutableStateOf("সকল শ্রেণী") }
+    var expandedClassDropdown by remember { mutableStateOf(false) }
+
+    val classesList = remember(students) {
+        listOf("সকল শ্রেণী") + students.map { it.cls }.distinct().filter { it.isNotBlank() }
+    }
 
     LaunchedEffect(students) {
         students.forEach { s ->
@@ -39,6 +51,11 @@ fun AttendanceScreen(
                 attendanceState[s.id] = "উপস্থিত"
             }
         }
+    }
+
+    val filteredStudents = remember(students, selectedClassFilter) {
+        val list = if (selectedClassFilter == "সকল শ্রেণী") students else students.filter { it.cls == selectedClassFilter }
+        list.sortedBy { s -> s.roll.toIntOrNull() ?: 9999 }
     }
 
     val statusOptions = listOf("উপস্থিত", "অনুপস্থিত", "ছুটি")
@@ -58,36 +75,96 @@ fun AttendanceScreen(
                 elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text = "দৈনিক হাজিরা",
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = selectedDate,
-                        onValueChange = { selectedDate = it },
-                        label = { Text("তারিখ (YYYY-MM-DD)") },
+                    Row(
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(10.dp)
-                    )
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "দৈনিক হাজিরা (শ্রেণী ও রোল অনুযায়ী)",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Button(
+                            onClick = {
+                                onSaveAttendance(selectedDate, attendanceState.toMap())
+                                Toast.makeText(context, "হাজিরা সফলভাবে সংরক্ষিত হয়েছে ($selectedDate)!", Toast.LENGTH_LONG).show()
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = MadrasaGreen),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.testTag("save_attendance_btn")
+                        ) {
+                            Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("সংরক্ষণ", fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = selectedDate,
+                            onValueChange = { selectedDate = it },
+                            label = { Text("তারিখ (YYYY-MM-DD)") },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(10.dp),
+                            singleLine = true
+                        )
+
+                        ExposedDropdownMenuBox(
+                            expanded = expandedClassDropdown,
+                            onExpandedChange = { expandedClassDropdown = !expandedClassDropdown },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            OutlinedTextField(
+                                value = selectedClassFilter,
+                                onValueChange = {},
+                                readOnly = true,
+                                label = { Text("শ্রেণী নির্বাচন") },
+                                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedClassDropdown) },
+                                modifier = Modifier
+                                    .menuAnchor()
+                                    .fillMaxWidth(),
+                                shape = RoundedCornerShape(10.dp)
+                            )
+                            ExposedDropdownMenu(
+                                expanded = expandedClassDropdown,
+                                onDismissRequest = { expandedClassDropdown = false }
+                            ) {
+                                classesList.forEach { cls ->
+                                    DropdownMenuItem(
+                                        text = { Text(cls) },
+                                        onClick = {
+                                            selectedClassFilter = cls
+                                            expandedClassDropdown = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
 
-        if (students.isEmpty()) {
+        if (filteredStudents.isEmpty()) {
             item {
                 MadrasaEmptyState(
                     icon = Icons.Default.FactCheck,
                     title = "কোন ছাত্র পাওয়া যায়নি",
-                    subtitle = "হাজিরা নেওয়ার জন্য আগে ভর্তি অপশন থেকে ছাত্র যুক্ত করুন"
+                    subtitle = "এই শ্রেণীতে কোন ছাত্র ভর্তি করা হয়নি"
                 )
             }
         } else {
-            items(students) { student ->
+            items(filteredStudents, key = { it.id }) { student ->
                 var expanded by remember { mutableStateOf(false) }
                 val currentStatus = attendanceState[student.id] ?: "উপস্থিত"
+                val rollDisplay = if (student.roll.isNotBlank()) "রোল: ${student.roll}" else "রোল: -"
 
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -104,9 +181,9 @@ fun AttendanceScreen(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Text(text = student.name, fontWeight = FontWeight.Bold, fontSize = 15.5.sp)
+                            Text(text = student.name, fontWeight = FontWeight.Bold, fontSize = 15.sp)
                             Text(
-                                text = student.cls,
+                                text = "${student.cls}  •  $rollDisplay",
                                 fontSize = 12.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -115,7 +192,7 @@ fun AttendanceScreen(
                         Box {
                             OutlinedButton(
                                 onClick = { expanded = true },
-                                modifier = Modifier.heightIn(min = 42.dp),
+                                modifier = Modifier.heightIn(min = 40.dp),
                                 shape = RoundedCornerShape(10.dp)
                             ) {
                                 Text(
@@ -123,7 +200,8 @@ fun AttendanceScreen(
                                         "উপস্থিত" -> "✅ উপস্থিত"
                                         "অনুপস্থিত" -> "❌ অনুপস্থিত"
                                         else -> "🟡 ছুটি"
-                                    }
+                                    },
+                                    fontSize = 13.sp
                                 )
                             }
                             DropdownMenu(
@@ -149,40 +227,6 @@ fun AttendanceScreen(
                                 }
                             }
                         }
-                    }
-                }
-            }
-
-            item {
-                Spacer(modifier = Modifier.height(6.dp))
-                Button(
-                    onClick = {
-                        onSaveAttendance(selectedDate, attendanceState.toMap())
-                        val presentCount = attendanceState.values.count { it == "উপস্থিত" }
-                        summaryText = "আজ উপস্থিত: $presentCount জন, মোট: ${students.size} জন"
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 48.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = MadrasaPrimary, contentColor = Color.White),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Text("হাজিরা সেভ করুন", fontSize = 15.5.sp, fontWeight = FontWeight.Bold)
-                }
-                if (summaryText.isNotEmpty()) {
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Surface(
-                        color = MadrasaGreen.copy(alpha = 0.12f),
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(
-                            text = summaryText,
-                            color = MadrasaGreen,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp,
-                            modifier = Modifier.padding(12.dp)
-                        )
                     }
                 }
             }

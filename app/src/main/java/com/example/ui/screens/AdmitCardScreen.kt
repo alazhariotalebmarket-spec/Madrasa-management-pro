@@ -49,7 +49,8 @@ fun AdmitCardScreen(
     var scheduleNote by remember { mutableStateOf("পরীক্ষা শুরু: সকাল ১০:০০ টা • পরীক্ষা শুরুর ১৫ মিনিট পূর্বে আসন গ্রহণ করতে হবে।") }
 
     val filteredStudents = remember(students, selectedClass) {
-        if (selectedClass == "সব শ্রেণী") students else students.filter { it.cls == selectedClass }
+        val list = if (selectedClass == "সব শ্রেণী") students else students.filter { it.cls == selectedClass }
+        list.sortedBy { s -> s.roll.toIntOrNull() ?: 9999 }
     }
 
     LazyColumn(

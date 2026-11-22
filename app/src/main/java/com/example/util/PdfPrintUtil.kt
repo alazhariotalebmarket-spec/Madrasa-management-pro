@@ -2114,4 +2114,44 @@ object PdfPrintUtil {
             Toast.makeText(context, "পিডিএফ ওপেন করতে ত্রুটি: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
+
+    fun generateAndShareExpensesReportPdf(
+        context: Context,
+        periodTitle: String,
+        expenses: List<ExpenseEntity>,
+        totalIncome: Double,
+        totalExpense: Double,
+        netBalance: Double
+    ) {
+        generateAndShareExpenseDepositReportPdf(
+            context = context,
+            reportType = "খরচ ও জমা",
+            period = periodTitle,
+            isYearly = false,
+            list = expenses,
+            totalAmount = totalExpense
+        )
+    }
+
+    fun generateAndShareFeesReportPdf(
+        context: Context,
+        reportTitle: String,
+        fees: List<FeeEntity>,
+        students: List<StudentEntity>,
+        totalCollected: Double,
+        totalDue: Double
+    ) {
+        generateAndShareFeeReportPdf(
+            context = context,
+            period = reportTitle,
+            isYearly = false,
+            students = students,
+            fees = fees
+        )
+    }
+
+    fun generateAndShareStudentIdCardPdf(context: Context, student: StudentEntity) {
+        generateAndShareIdCardPdf(context, student)
+    }
 }
+

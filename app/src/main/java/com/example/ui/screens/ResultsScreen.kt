@@ -194,9 +194,53 @@ fun ResultsScreen(
                             )
                         }
                     }
-                    Spacer(modifier = Modifier.height(8.dp))
+                    var selectedClassFilter by remember { mutableStateOf("সকল শ্রেণী") }
+                    var expandedClassFilter by remember { mutableStateOf(false) }
 
-                    Text(text = "ছাত্র:", fontSize = 13.sp, color = Color.Gray)
+                    val classesList = remember(students) {
+                        listOf("সকল শ্রেণী") + students.map { it.cls }.distinct().filter { it.isNotBlank() }
+                    }
+
+                    val filteredStudentsForResults = remember(students, selectedClassFilter) {
+                        val list = if (selectedClassFilter == "সকল শ্রেণী") students else students.filter { it.cls == selectedClassFilter }
+                        list.sortedBy { s -> s.roll.toIntOrNull() ?: 9999 }
+                    }
+
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(text = "শ্রেণী ফিল্টার:", fontSize = 12.sp, color = Color.Gray)
+                    ExposedDropdownMenuBox(
+                        expanded = expandedClassFilter,
+                        onExpandedChange = { expandedClassFilter = !expandedClassFilter }
+                    ) {
+                        OutlinedTextField(
+                            value = selectedClassFilter,
+                            onValueChange = {},
+                            readOnly = true,
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedClassFilter) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .menuAnchor(),
+                            shape = RoundedCornerShape(8.dp)
+                        )
+                        ExposedDropdownMenu(
+                            expanded = expandedClassFilter,
+                            onDismissRequest = { expandedClassFilter = false }
+                        ) {
+                            classesList.forEach { cls ->
+                                DropdownMenuItem(
+                                    text = { Text(cls) },
+                                    onClick = {
+                                        selectedClassFilter = cls
+                                        expandedClassFilter = false
+                                        filteredStudentsForResults.firstOrNull()?.let { selectedStudentId = it.id }
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(text = "ছাত্র নির্বাচন (রোল অনুযায়ী):", fontSize = 13.sp, color = Color.Gray)
                     ExposedDropdownMenuBox(
                         expanded = expandedStudent,
                         onExpandedChange = { expandedStudent = !expandedStudent }
@@ -215,7 +259,7 @@ fun ResultsScreen(
                             expanded = expandedStudent,
                             onDismissRequest = { expandedStudent = false }
                         ) {
-                            students.forEach { s ->
+                            filteredStudentsForResults.forEach { s ->
                                 DropdownMenuItem(
                                     text = { Text("${s.name} - ${s.cls}${if (s.roll.isNotBlank()) " (রোল: ${s.roll})" else ""}") },
                                     onClick = {

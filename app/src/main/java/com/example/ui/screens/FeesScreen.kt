@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import android.widget.Toast
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -18,6 +19,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -61,7 +63,19 @@ fun FeesScreen(
         return
     }
 
-    var selectedStudentId by remember { mutableStateOf(students.first().id) }
+    var selectedClassFilter by remember { mutableStateOf("সকল শ্রেণী") }
+    var expandedClassFilter by remember { mutableStateOf(false) }
+
+    val classesList = remember(students) {
+        listOf("সকল শ্রেণী") + students.map { it.cls }.distinct().filter { it.isNotBlank() }
+    }
+
+    val filteredStudents = remember(students, selectedClassFilter) {
+        val list = if (selectedClassFilter == "সকল শ্রেণী") students else students.filter { it.cls == selectedClassFilter }
+        list.sortedBy { s -> s.roll.toIntOrNull() ?: 9999 }
+    }
+
+    var selectedStudentId by remember(filteredStudents) { mutableStateOf(filteredStudents.firstOrNull()?.id ?: students.first().id) }
     var feeType by remember { mutableStateOf("মাসিক বেতন") }
     var feeMonth by remember { mutableStateOf("জানুয়ারি") }
     var feeYear by remember {
@@ -95,7 +109,6 @@ fun FeesScreen(
     val feeTypes = listOf("মাসিক বেতন", "মাসিক বিদ্যুৎ বিল", "পরীক্ষার ফি", "ভর্তি ফি", "অন্যান্য")
     val months = listOf("জানুয়ারি", "ফেব্রুয়ারি", "মার্চ", "এপ্রিল", "মে", "জুন", "জুলাই", "আগস্ট", "সেপ্টেম্বর", "অক্টোবর", "নভেম্বর", "ডিসেম্বর")
 
-    // Filtered fees for calculations
     val reportFees = remember(fees, isYearlyReport, filterMonth, filterYear) {
         fees.filter { fee ->
             val matchYear = fee.date.endsWith(filterYear) || fee.month.contains(filterYear)
@@ -113,7 +126,6 @@ fun FeesScreen(
     val totalOtherCollected = reportFees.filter { it.type !in listOf("মাসিক বেতন", "মাসিক বিদ্যুৎ বিল", "পরীক্ষার ফি") }.sumOf { it.amount }
     val totalCollected = reportFees.sumOf { it.amount }
 
-    // Expected calculation
     val expectedTuition = if (isYearlyReport) students.sumOf { it.fee * 12 } else students.sumOf { it.fee }
     val expectedElectric = if (isYearlyReport) students.sumOf { it.electricBill * 12 } else students.sumOf { it.electricBill }
     val totalExpected = expectedTuition + expectedElectric
@@ -125,7 +137,7 @@ fun FeesScreen(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // Fee Collection Card
+        // Fee Collection Card with Class & Roll Filtering
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -136,101 +148,118 @@ fun FeesScreen(
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(
-                        text = "💰 বেতন ও ফি আদায় এন্ট্রি",
-                        fontSize = 17.sp,
+                        text = "💰 বেতন ও বিদ্যুৎ বিল আদায় (শ্রেণী ও রোল অনুযায়ী)",
+                        fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.primary
                     )
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
 
-                    Text(text = "ছাত্র নির্বাচন:", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    ExposedDropdownMenuBox(
-                        expanded = expandedStudent,
-                        onExpandedChange = { expandedStudent = !expandedStudent }
-                    ) {
-                        OutlinedTextField(
-                            value = "${selectedStudent.name} (${selectedStudent.cls})",
-                            onValueChange = {},
-                            readOnly = true,
-                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedStudent) },
-                            modifier = Modifier.fillMaxWidth().menuAnchor(),
-                            shape = RoundedCornerShape(10.dp)
-                        )
-                        ExposedDropdownMenu(
-                            expanded = expandedStudent,
-                            onDismissRequest = { expandedStudent = false }
-                        ) {
-                            students.forEach { s ->
-                                DropdownMenuItem(
-                                    text = {
-                                        Text("${s.name} - ${s.cls} (বেতন: ${s.fee.toInt()}৳, কারেন্ট: ${s.electricBill.toInt()}৳)")
-                                    },
-                                    onClick = {
-                                        selectedStudentId = s.id
-                                        expandedStudent = false
-                                    }
-                                )
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Surface(
-                        color = MadrasaContainer,
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text("মাসিক বেতন: ${selectedStudent.fee.toInt()} ৳", fontSize = 12.sp, color = MadrasaPrimary, fontWeight = FontWeight.Bold)
-                            Text("মাসিক বিদ্যুৎ বিল: ${selectedStudent.electricBill.toInt()} ৳", fontSize = 12.sp, color = MadrasaAccent, fontWeight = FontWeight.Bold)
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(text = "খাত নির্বাচন:", fontSize = 13.sp, color = Color.Gray)
-                    ExposedDropdownMenuBox(
-                        expanded = expandedType,
-                        onExpandedChange = { expandedType = !expandedType }
-                    ) {
-                        OutlinedTextField(
-                            value = feeType,
-                            onValueChange = {},
-                            readOnly = true,
-                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedType) },
-                            modifier = Modifier.fillMaxWidth().menuAnchor(),
-                            shape = RoundedCornerShape(8.dp)
-                        )
-                        ExposedDropdownMenu(
-                            expanded = expandedType,
-                            onDismissRequest = { expandedType = false }
-                        ) {
-                            feeTypes.forEach { t ->
-                                DropdownMenuItem(
-                                    text = { Text(t) },
-                                    onClick = {
-                                        feeType = t
-                                        expandedType = false
-                                    }
-                                )
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(8.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        OutlinedTextField(
-                            value = amountStr,
-                            onValueChange = { amountStr = it },
-                            label = { Text("টাকার পরিমাণ") },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(8.dp)
-                        )
+                        // Class Filter
+                        ExposedDropdownMenuBox(
+                            expanded = expandedClassFilter,
+                            onExpandedChange = { expandedClassFilter = !expandedClassFilter },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            OutlinedTextField(
+                                value = selectedClassFilter,
+                                onValueChange = {},
+                                readOnly = true,
+                                label = { Text("শ্রেণী ফিল্টার") },
+                                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedClassFilter) },
+                                modifier = Modifier
+                                    .menuAnchor()
+                                    .fillMaxWidth(),
+                                shape = RoundedCornerShape(10.dp)
+                            )
+                            ExposedDropdownMenu(
+                                expanded = expandedClassFilter,
+                                onDismissRequest = { expandedClassFilter = false }
+                            ) {
+                                classesList.forEach { cls ->
+                                    DropdownMenuItem(
+                                        text = { Text(cls) },
+                                        onClick = {
+                                            selectedClassFilter = cls
+                                            expandedClassFilter = false
+                                            val nextList = if (cls == "সকল শ্রেণী") students else students.filter { it.cls == cls }
+                                            nextList.firstOrNull()?.let { selectedStudentId = it.id }
+                                        }
+                                    )
+                                }
+                            }
+                        }
+
+                        // Student Dropdown (filtered by class, sorted by roll)
+                        ExposedDropdownMenuBox(
+                            expanded = expandedStudent,
+                            onExpandedChange = { expandedStudent = !expandedStudent },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            OutlinedTextField(
+                                value = "${selectedStudent.name} (রোল: ${selectedStudent.roll.ifEmpty { "-" }})",
+                                onValueChange = {},
+                                readOnly = true,
+                                label = { Text("ছাত্র নির্বাচন") },
+                                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedStudent) },
+                                modifier = Modifier
+                                    .menuAnchor()
+                                    .fillMaxWidth(),
+                                shape = RoundedCornerShape(10.dp)
+                            )
+                            ExposedDropdownMenu(
+                                expanded = expandedStudent,
+                                onDismissRequest = { expandedStudent = false }
+                            ) {
+                                filteredStudents.forEach { student ->
+                                    DropdownMenuItem(
+                                        text = { Text("${student.name} (রোল: ${student.roll.ifEmpty { "-" }}) — ${student.cls}") },
+                                        onClick = {
+                                            selectedStudentId = student.id
+                                            expandedStudent = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        ExposedDropdownMenuBox(
+                            expanded = expandedType,
+                            onExpandedChange = { expandedType = !expandedType },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            OutlinedTextField(
+                                value = feeType,
+                                onValueChange = {},
+                                readOnly = true,
+                                label = { Text("খাত") },
+                                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedType) },
+                                modifier = Modifier.menuAnchor().fillMaxWidth(),
+                                shape = RoundedCornerShape(10.dp)
+                            )
+                            ExposedDropdownMenu(expanded = expandedType, onDismissRequest = { expandedType = false }) {
+                                feeTypes.forEach { t ->
+                                    DropdownMenuItem(
+                                        text = { Text(t) },
+                                        onClick = {
+                                            feeType = t
+                                            expandedType = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
 
                         ExposedDropdownMenuBox(
                             expanded = expandedMonth,
@@ -238,21 +267,18 @@ fun FeesScreen(
                             modifier = Modifier.weight(1f)
                         ) {
                             OutlinedTextField(
-                                value = feeMonth,
+                                value = "$feeMonth $feeYear",
                                 onValueChange = {},
                                 readOnly = true,
-                                label = { Text("মাস") },
+                                label = { Text("মাস ও বছর") },
                                 trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedMonth) },
-                                modifier = Modifier.menuAnchor(),
-                                shape = RoundedCornerShape(8.dp)
+                                modifier = Modifier.menuAnchor().fillMaxWidth(),
+                                shape = RoundedCornerShape(10.dp)
                             )
-                            ExposedDropdownMenu(
-                                expanded = expandedMonth,
-                                onDismissRequest = { expandedMonth = false }
-                            ) {
+                            ExposedDropdownMenu(expanded = expandedMonth, onDismissRequest = { expandedMonth = false }) {
                                 months.forEach { m ->
                                     DropdownMenuItem(
-                                        text = { Text(m) },
+                                        text = { Text("$m $feeYear") },
                                         onClick = {
                                             feeMonth = m
                                             expandedMonth = false
@@ -263,35 +289,262 @@ fun FeesScreen(
                         }
                     }
 
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    OutlinedTextField(
+                        value = amountStr,
+                        onValueChange = { amountStr = it },
+                        label = { Text("টাকার পরিমাণ *") },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp)
+                    )
+
                     Spacer(modifier = Modifier.height(12.dp))
+
                     Button(
                         onClick = {
                             val amt = amountStr.toDoubleOrNull() ?: 0.0
                             if (amt <= 0) return@Button
-                            onAddFee(selectedStudentId, amt, feeType, feeMonth)
+                            val monthStr = "$feeMonth $feeYear"
+                            onAddFee(selectedStudent.id, amt, feeType, monthStr)
+                            Toast.makeText(context, "${selectedStudent.name}-এর $feeType ($monthStr) সফলভাবে আদায় হয়েছে!", Toast.LENGTH_LONG).show()
                         },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .heightIn(min = 48.dp),
+                            .heightIn(min = 48.dp)
+                            .testTag("save_fee_button"),
                         colors = ButtonDefaults.buttonColors(containerColor = MadrasaPrimary, contentColor = Color.White),
                         shape = RoundedCornerShape(10.dp)
                     ) {
-                        Text("টাকা জমা করুন", fontSize = 15.5.sp, fontWeight = FontWeight.Bold)
+                        Text("ফি আদায় ও রসিদ তৈরি করুন", fontSize = 15.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
         }
 
-        // Active Receipt View
-        if (activeReceiptFee != null) {
-            val rFee = activeReceiptFee!!
-            val rStudent = students.find { it.id == rFee.studentId }
+        // Summary Card
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = madrasaCardBorder(),
+                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "📊 ফি আদায় রিপোর্ট ও সারাংশ",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            OutlinedButton(
+                                onClick = { isYearlyReport = false },
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    containerColor = if (!isYearlyReport) MadrasaPrimary.copy(alpha = 0.15f) else Color.Transparent
+                                ),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.height(34.dp)
+                            ) {
+                                Text("মাসিক", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                            OutlinedButton(
+                                onClick = { isYearlyReport = true },
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    containerColor = if (isYearlyReport) MadrasaPrimary.copy(alpha = 0.15f) else Color.Transparent
+                                ),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.height(34.dp)
+                            ) {
+                                Text("বাৎসরিক", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        if (!isYearlyReport) {
+                            Box(modifier = Modifier.weight(1f)) {
+                                OutlinedButton(
+                                    onClick = { expandedFilterMonth = true },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Text("মাস: $filterMonth", fontSize = 12.sp)
+                                }
+                                DropdownMenu(expanded = expandedFilterMonth, onDismissRequest = { expandedFilterMonth = false }) {
+                                    months.forEach { m ->
+                                        DropdownMenuItem(
+                                            text = { Text(m) },
+                                            onClick = {
+                                                filterMonth = m
+                                                expandedFilterMonth = false
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        OutlinedTextField(
+                            value = filterYear,
+                            onValueChange = { filterYear = it },
+                            label = { Text("বছর") },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(8.dp),
+                            singleLine = true
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Text("মাসিক বেতন আদায়: ${totalSalaryCollected.toInt()} ৳", fontSize = 13.sp, color = MadrasaGreen, fontWeight = FontWeight.SemiBold)
+                    Text("বিদ্যুৎ বিল আদায়: ${totalElectricCollected.toInt()} ৳", fontSize = 13.sp, color = MadrasaGreen, fontWeight = FontWeight.SemiBold)
+                    Text("পরীক্ষার ফি আদায়: ${totalExamCollected.toInt()} ৳", fontSize = 13.sp)
+                    Text("অন্যান্য আদায়: ${totalOtherCollected.toInt()} ৳", fontSize = 13.sp)
+                    Text("মোট আদায়: ${totalCollected.toInt()} ৳", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                    Text("মোট বকেয়া: ${totalDue.toInt()} ৳", fontSize = 13.5.sp, fontWeight = FontWeight.Bold, color = MadrasaRed)
+
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Button(
+                        onClick = {
+                            val titleStr = if (isYearlyReport) "বাৎসরিক ফি আদায় রিপোর্ট - $filterYear" else "মাসিক ফি আদায় রিপোর্ট - $filterMonth $filterYear"
+                            PdfPrintUtil.generateAndShareFeesReportPdf(
+                                context = context,
+                                reportTitle = titleStr,
+                                fees = reportFees,
+                                students = students,
+                                totalCollected = totalCollected,
+                                totalDue = totalDue
+                            )
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 46.dp)
+                            .testTag("download_fees_report_pdf_button"),
+                        colors = ButtonDefaults.buttonColors(containerColor = MadrasaPrimary, contentColor = Color.White),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Icon(Icons.Default.PictureAsPdf, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = if (isYearlyReport) "বাৎসরিক ফি রিপোর্ট PDF ডাউনলোড" else "মাসিক ফি রিপোর্ট PDF ডাউনলোড",
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+        }
+
+        // Recent Fees List
+        item {
+            Text(
+                text = "সাম্প্রতিক ফি আদায়ের রশিদ (${fees.size} টি)",
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
+            )
+        }
+
+        if (fees.isEmpty()) {
             item {
+                MadrasaEmptyState(
+                    icon = Icons.Default.Payments,
+                    title = "কোন ফি আদায়ের রেকর্ড নেই",
+                    subtitle = "উপরের ফর্ম থেকে ফি আদায় করুন"
+                )
+            }
+        } else {
+            items(fees.sortedByDescending { it.id }, key = { it.id }) { fee ->
+                val fStudent = students.find { it.id == fee.studentId }
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    border = madrasaCardBorder(),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = fStudent?.name ?: "অজ্ঞাত ছাত্র",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 15.sp,
+                                color = TextDark
+                            )
+                            Text(
+                                text = "খাত: ${fee.type} (${fee.month}) • তারিখ: ${fee.date}",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "${fee.amount.toInt()} ৳",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 15.5.sp,
+                                color = MadrasaGreen
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            IconButton(onClick = { activeReceiptFee = fee }) {
+                                Icon(Icons.Default.PictureAsPdf, contentDescription = "রসিদ", tint = MadrasaPrimary, modifier = Modifier.size(20.dp))
+                            }
+                            IconButton(onClick = { onDeleteFee(fee.id) }) {
+                                Icon(Icons.Default.Delete, contentDescription = "মুছুন", tint = MadrasaRed, modifier = Modifier.size(20.dp))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (activeReceiptFee != null) {
+        val rFee = activeReceiptFee!!
+        val rStudent = students.find { it.id == rFee.studentId }
+        AlertDialog(
+            onDismissRequest = { activeReceiptFee = null },
+            confirmButton = {
+                Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Button(
+                        onClick = { PdfPrintUtil.generateAndShareFeeReceiptPdf(context, rStudent, rFee) },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = MadrasaPrimary),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text("🖨️ PDF রসিদ ডাউনলোড ও শেয়ার", fontWeight = FontWeight.Bold)
+                    }
+                    TextButton(onClick = { activeReceiptFee = null }, modifier = Modifier.align(Alignment.End)) {
+                        Text("বন্ধ করুন")
+                    }
+                }
+            },
+            dismissButton = {},
+            text = {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(16.dp),
                     colors = CardDefaults.cardColors(containerColor = Color.White),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+                    elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
                 ) {
                     Column(
                         modifier = Modifier.padding(16.dp),
@@ -325,239 +578,11 @@ fun FeesScreen(
                             Text(text = "পিতা: ${rStudent?.father.orEmpty().ifEmpty { "প্রযোজ্য নয়" }}", color = TextDark)
                             Text(text = "খাত: ${rFee.type} (${rFee.month})", color = TextDark)
                             Spacer(modifier = Modifier.height(4.dp))
-                            Text(text = "জমার পরিমাণ: ${rFee.amount.toInt()} ৳", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = MadrasaPrimary)
-                        }
-                        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = Color(0xFFE2E8F0))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Button(
-                                onClick = {
-                                    PdfPrintUtil.generateAndShareFeeReceiptPdf(context, rStudent, rFee)
-                                },
-                                modifier = Modifier.heightIn(min = 44.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = MadrasaPrimary, contentColor = Color.White),
-                                shape = RoundedCornerShape(10.dp)
-                            ) {
-                                Text("🖨️ PDF ডাউনলোড / সেভ", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                            }
-
-                            Button(
-                                onClick = { activeReceiptFee = null },
-                                modifier = Modifier.heightIn(min = 44.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = MadrasaAccent, contentColor = Color.White),
-                                shape = RoundedCornerShape(10.dp)
-                            ) {
-                                Text("বন্ধ", fontSize = 13.sp)
-                            }
+                            Text(text = "পরিমাণ: ${rFee.amount.toInt()} ৳", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = MadrasaGreen)
                         }
                     }
                 }
             }
-        }
-
-        // Monthly & Yearly Report Section
-        item {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                border = madrasaCardBorder(),
-                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text = "📊 মাসিক ও বাৎসরিক হিসাব ও রিপোর্ট",
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        FilterChip(
-                            selected = !isYearlyReport,
-                            onClick = { isYearlyReport = false },
-                            label = { Text("মাসিক হিসাব") }
-                        )
-                        FilterChip(
-                            selected = isYearlyReport,
-                            onClick = { isYearlyReport = true },
-                            label = { Text("বাৎসরিক হিসাব") }
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        if (!isYearlyReport) {
-                            ExposedDropdownMenuBox(
-                                expanded = expandedFilterMonth,
-                                onExpandedChange = { expandedFilterMonth = !expandedFilterMonth },
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                OutlinedTextField(
-                                    value = filterMonth,
-                                    onValueChange = {},
-                                    readOnly = true,
-                                    label = { Text("মাস") },
-                                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedFilterMonth) },
-                                    modifier = Modifier.menuAnchor(),
-                                    shape = RoundedCornerShape(8.dp)
-                                )
-                                ExposedDropdownMenu(
-                                    expanded = expandedFilterMonth,
-                                    onDismissRequest = { expandedFilterMonth = false }
-                                ) {
-                                    months.forEach { m ->
-                                        DropdownMenuItem(
-                                            text = { Text(m) },
-                                            onClick = {
-                                                filterMonth = m
-                                                expandedFilterMonth = false
-                                            }
-                                        )
-                                    }
-                                }
-                            }
-                        }
-
-                        OutlinedTextField(
-                            value = filterYear,
-                            onValueChange = { filterYear = it },
-                            label = { Text("বছর") },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(8.dp)
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(12.dp))
-                    // Summary Box
-                    Card(
-                        shape = RoundedCornerShape(12.dp),
-                        colors = CardDefaults.cardColors(containerColor = MadrasaContainer)
-                    ) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text("মোট ধার্য:", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = TextDark)
-                                Text("${totalExpected.toInt()} ৳", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = MadrasaPrimary)
-                            }
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text("সর্বমোট জমা:", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = TextDark)
-                                Text("${totalCollected.toInt()} ৳", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = MadrasaGreen)
-                            }
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text("সর্বমোট বাকি:", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = TextDark)
-                                Text("${totalDue.toInt()} ৳", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = MadrasaRed)
-                            }
-                            HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp), color = MadrasaPrimary.copy(alpha = 0.2f))
-                            Text(
-                                text = "• মাসিক বেতন আদায়: ${totalSalaryCollected.toInt()} ৳\n" +
-                                        "• বিদ্যুৎ বিল আদায়: ${totalElectricCollected.toInt()} ৳\n" +
-                                        "• পরীক্ষার ফি আদায়: ${totalExamCollected.toInt()} ৳",
-                                fontSize = 12.sp,
-                                color = TextMuted
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Button(
-                        onClick = {
-                            val periodTitle = if (isYearlyReport) "$filterYear সাল (বাৎসরিক)" else "$filterMonth $filterYear (মাসিক)"
-                            PdfPrintUtil.generateAndShareFeeReportPdf(
-                                context = context,
-                                period = periodTitle,
-                                isYearly = isYearlyReport,
-                                students = students,
-                                fees = reportFees
-                            )
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(min = 48.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = MadrasaPrimary, contentColor = Color.White),
-                        shape = RoundedCornerShape(10.dp)
-                    ) {
-                        Icon(Icons.Default.PictureAsPdf, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = if (isYearlyReport) "📊 বাৎসরিক রিপোর্ট PDF ডাউনলোড" else "📄 মাসিক রিপোর্ট PDF ডাউনলোড",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-            }
-        }
-
-        // Recent Transactions List
-        item {
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = "সাম্প্রতিক আদায় তালিকা (${fees.size} টি)",
-                fontSize = 17.sp,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary
-            )
-        }
-
-        if (fees.isEmpty()) {
-            item {
-                MadrasaEmptyState(
-                    icon = Icons.Default.Payments,
-                    title = "কোন ফি জমা হয়নি",
-                    subtitle = "উপরের ফর্ম থেকে ছাত্রের বেতন বা বিদ্যুৎ বিল জমা দিন"
-                )
-            }
-        } else {
-            items(fees.reversed()) { fee ->
-                val s = students.find { it.id == fee.studentId }
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(14.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    border = madrasaCardBorder(),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(text = "${s?.name ?: "ছাত্র"} - ${fee.type} (${fee.month})", fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                            Text(text = "${fee.date}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(text = "${fee.amount.toInt()} ৳", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = MaterialTheme.colorScheme.primary)
-                            Spacer(modifier = Modifier.width(4.dp))
-                            TextButton(onClick = { activeReceiptFee = fee }) {
-                                Text("রশিদ")
-                            }
-                            IconButton(onClick = { onDeleteFee(fee.id) }) {
-                                Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MadrasaRed)
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        )
     }
 }

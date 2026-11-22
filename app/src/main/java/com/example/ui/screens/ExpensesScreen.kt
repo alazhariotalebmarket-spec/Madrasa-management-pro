@@ -1,10 +1,14 @@
 package com.example.ui.screens
 
+import android.widget.Toast
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.ReceiptLong
@@ -40,13 +44,19 @@ fun ExpensesScreen(
     onDeleteExpense: (Int) -> Unit
 ) {
     val context = LocalContext.current
-    var selectedTab by remember { mutableStateOf("খরচ") } // "খরচ" or "মুহতামিম জমা" (both are ব্যয়/outflows)
+    var selectedTab by remember { mutableStateOf("খরচ") } // "খরচ" or "মুহতামিম জমা"
 
     var desc by remember { mutableStateOf("") }
     var amountStr by remember { mutableStateOf("") }
     var entryDate by remember {
         mutableStateOf(SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date()))
     }
+
+    // Muhtamim Jama sub-heads
+    val defaultMuhtamimHeads = remember { mutableStateListOf("বেতন", "বিদ্যুৎ বিল", "ভর্তি ফি", "পরীক্ষার ফি") }
+    var selectedMuhtamimHead by remember { mutableStateOf("বেতন") }
+    var showAddHeadDialog by remember { mutableStateOf(false) }
+    var customHeadInput by remember { mutableStateOf("") }
 
     val months = listOf("জানুয়ারি", "ফেব্রুয়ারি", "মার্চ", "এপ্রিল", "মে", "জুন", "জুলাই", "আগস্ট", "সেপ্টেম্বর", "অক্টোবর", "নভেম্বর", "ডিসেম্বর")
     var isYearly by remember { mutableStateOf(false) }
@@ -58,7 +68,6 @@ fun ExpensesScreen(
     }
     var expandedFilterMonth by remember { mutableStateOf(false) }
 
-    // Filtered expenses for the selected tab
     val filteredList = remember(expenses, selectedTab, isYearly, filterMonth, filterYear) {
         expenses.filter { exp ->
             val matchType = exp.type == selectedTab
@@ -76,7 +85,6 @@ fun ExpensesScreen(
 
     val totalTabAmount = filteredList.sumOf { it.amount }
 
-    // Period expense totals (Both সাধারণ খরচ and মুহতামিম জমা are ব্যয়)
     val allPeriodExpenses = remember(expenses, isYearly, filterMonth, filterYear) {
         expenses.filter { exp ->
             val matchYear = exp.date.endsWith(filterYear) || exp.date.isEmpty()
@@ -91,7 +99,6 @@ fun ExpensesScreen(
         }
     }
 
-    // Period collected student monthly salary + electricity bill (আয়)
     val periodSalaryAndElectricIncome = remember(fees, isYearly, filterMonth, filterYear) {
         fees.filter { f ->
             val isFeeOrElectric = f.type == "মাসিক বেতন" || f.type == "মাসিক বিদ্যুৎ বিল"
@@ -112,7 +119,7 @@ fun ExpensesScreen(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // Tab Selector: ১. খরচ vs ২. মুহতামিম জমা (ব্যয়)
+        // Tab Selector
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -172,8 +179,8 @@ fun ExpensesScreen(
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(
-                        text = if (selectedTab == "খরচ") "🧾 নতুন খরচ এন্ট্রি (ব্যয়)" else "📤 মুহতামিম জমা এন্ট্রি (ব্যয়)",
-                        fontSize = 17.sp,
+                        text = if (selectedTab == "খরচ") "🧾 নতুন খরচ এন্ট্রি (ব্যয়)" else "📤 মুহতামিম জমা এন্ট্রি (বেতন, বিদ্যুৎ, ভর্তি, পরীক্ষা)",
+                        fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
                         color = if (selectedTab == "খরচ") MaterialTheme.colorScheme.primary else MadrasaRed
                     )
@@ -187,45 +194,57 @@ fun ExpensesScreen(
                         ) {
                             Column(modifier = Modifier.padding(10.dp)) {
                                 Text(
-                                    text = "ছাত্র-ছাত্রীদের আদায়কৃত মাসিক বেতন ও বিদ্যুৎ বিল মুহতামিম নিয়ে গেলে এখানে এন্ট্রি করুন। এটি মাদ্রাসার হিসাব থেকে ব্যয় হিসেবে বাদ যাবে।",
+                                    text = "মুহতামিম জমার বিবরণ: বেতন, বিদ্যুৎ বিল, ভর্তি ফি, পরীক্ষার ফি ও টাকার পরিমাণ সহ এন্ট্রি করুন। নতুন খাত যোগ করতে '+' বাটন চাপুন।",
                                     fontSize = 12.sp,
                                     color = Color(0xFF7F1D1D),
                                     lineHeight = 16.sp
                                 )
-                                Spacer(modifier = Modifier.height(6.dp))
+                                Spacer(modifier = Modifier.height(4.dp))
                                 Text(
-                                    text = "আদায়কৃত বেতন ও বিদ্যুৎ বিল: ${periodSalaryAndElectricIncome.toInt()} ৳  •  জমা হয়েছে: ${periodMuhtamimJoma.toInt()} ৳  •  বাকি: ${remainingToHandover.toInt()} ৳",
+                                    text = "বাকি জমা দেওয়ার মতো সংগ্রহ: ${remainingToHandover.toInt()} ৳",
                                     fontSize = 11.5.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = MadrasaPrimary
                                 )
-                                if (remainingToHandover > 0) {
-                                    Spacer(modifier = Modifier.height(6.dp))
-                                    OutlinedButton(
-                                        onClick = {
-                                            desc = if (isYearly) {
-                                                "$filterYear সালের ছাত্রদের মাসিক বেতন ও বিদ্যুৎ বিল বাবদ মুহতামিম জমা"
-                                            } else {
-                                                "$filterMonth $filterYear-এর ছাত্রদের মাসিক বেতন ও বিদ্যুৎ বিল বাবদ মুহতামিম জমা"
-                                            }
-                                            amountStr = remainingToHandover.toInt().toString()
-                                        },
-                                        shape = RoundedCornerShape(8.dp),
-                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
-                                    ) {
-                                        Text(
-                                            text = "অবশিষ্ট বেতন ও বিদ্যুৎ বিল (${remainingToHandover.toInt()} ৳) বসান",
-                                            fontSize = 12.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = MadrasaRed
-                                        )
-                                    }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // Muhtamim 4+ Heads Selector with '+' Button
+                        Text("খাত নির্বাচন:", fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            defaultMuhtamimHeads.forEach { head ->
+                                OutlinedButton(
+                                    onClick = { selectedMuhtamimHead = head },
+                                    colors = ButtonDefaults.outlinedButtonColors(
+                                        containerColor = if (selectedMuhtamimHead == head) MadrasaRed.copy(alpha = 0.15f) else Color.Transparent,
+                                        contentColor = if (selectedMuhtamimHead == head) MadrasaRed else TextDark
+                                    ),
+                                    shape = RoundedCornerShape(8.dp),
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                    modifier = Modifier.height(36.dp)
+                                ) {
+                                    Text(head, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                                 }
+                            }
+                            IconButton(
+                                onClick = { showAddHeadDialog = true },
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .background(MadrasaPrimary, CircleShape)
+                            ) {
+                                Icon(Icons.Default.Add, contentDescription = "নতুন খাত যোগ করুন", tint = Color.White, modifier = Modifier.size(18.dp))
                             }
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
 
                     OutlinedTextField(
                         value = desc,
@@ -233,9 +252,9 @@ fun ExpensesScreen(
                         label = {
                             Text(
                                 if (selectedTab == "খরচ")
-                                    "খরচের বিবরণ (যেমন: চাল, ডাল, কারেন্ট বিল, মেরামত)"
+                                    "খরচের বিবরণ (যেমন: চাল, ডাল, মেরামত)"
                                 else
-                                    "মুহতামিম জমার বিবরণ (যেমন: মাসিক বেতন ও বিদ্যুৎ বিল বাবদ প্রদান)"
+                                    "বিবরণ / নোট (খাত: $selectedMuhtamimHead)"
                             )
                         },
                         modifier = Modifier.fillMaxWidth(),
@@ -250,7 +269,7 @@ fun ExpensesScreen(
                         OutlinedTextField(
                             value = amountStr,
                             onValueChange = { amountStr = it },
-                            label = { Text("টাকার পরিমাণ") },
+                            label = { Text("টাকার পরিমাণ *") },
                             modifier = Modifier.weight(1f),
                             shape = RoundedCornerShape(8.dp)
                         )
@@ -266,22 +285,28 @@ fun ExpensesScreen(
                     Spacer(modifier = Modifier.height(12.dp))
                     Button(
                         onClick = {
-                            if (desc.isBlank()) return@Button
                             val amt = amountStr.toDoubleOrNull() ?: 0.0
                             if (amt <= 0) return@Button
-                            onAddExpense(selectedTab, desc.trim(), amt, entryDate.trim())
+                            val finalDesc = if (selectedTab == "মুহতামিম জমা") {
+                                "[$selectedMuhtamimHead] ${desc.trim()}".trim()
+                            } else {
+                                desc.trim()
+                            }
+                            if (finalDesc.isBlank()) return@Button
+
+                            onAddExpense(selectedTab, finalDesc, amt, entryDate.trim())
                             desc = ""
                             amountStr = ""
                         },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 48.dp)
-                        .testTag("save_expense_button"),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (selectedTab == "খরচ") MadrasaPrimary else MadrasaRed,
-                        contentColor = Color.White
-                    ),
-                    shape = RoundedCornerShape(10.dp)
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 48.dp)
+                            .testTag("save_expense_button"),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (selectedTab == "খরচ") MadrasaPrimary else MadrasaRed,
+                            contentColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(10.dp)
                     ) {
                         Text(
                             text = if (selectedTab == "খরচ") "খরচ সেভ করুন" else "মুহতামিম জমা (ব্যয়) সেভ করুন",
@@ -301,54 +326,60 @@ fun ExpensesScreen(
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 border = madrasaCardBorder(),
-                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text = "📊 $selectedTab - মাসিক ও বাৎসরিক হিসাব (ব্যয়)",
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        FilterChip(
-                            selected = !isYearly,
-                            onClick = { isYearly = false },
-                            label = { Text("মাসিক হিসাব") }
+                        Text(
+                            text = "📊 মাসিক ও বাৎসরিক হিসাব রিপোর্ট",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
                         )
-                        FilterChip(
-                            selected = isYearly,
-                            onClick = { isYearly = true },
-                            label = { Text("বাৎসরিক হিসাব") }
-                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            OutlinedButton(
+                                onClick = { isYearly = false },
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    containerColor = if (!isYearly) MadrasaPrimary.copy(alpha = 0.15f) else Color.Transparent
+                                ),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.height(34.dp)
+                            ) {
+                                Text("মাসিক", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                            OutlinedButton(
+                                onClick = { isYearly = true },
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    containerColor = if (isYearly) MadrasaPrimary.copy(alpha = 0.15f) else Color.Transparent
+                                ),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.height(34.dp)
+                            ) {
+                                Text("বাৎসরিক", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
                     }
 
                     Spacer(modifier = Modifier.height(8.dp))
+
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         if (!isYearly) {
-                            ExposedDropdownMenuBox(
-                                expanded = expandedFilterMonth,
-                                onExpandedChange = { expandedFilterMonth = !expandedFilterMonth },
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                OutlinedTextField(
-                                    value = filterMonth,
-                                    onValueChange = {},
-                                    readOnly = true,
-                                    label = { Text("মাস") },
-                                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedFilterMonth) },
-                                    modifier = Modifier.menuAnchor(),
+                            Box(modifier = Modifier.weight(1f)) {
+                                OutlinedButton(
+                                    onClick = { expandedFilterMonth = true },
+                                    modifier = Modifier.fillMaxWidth(),
                                     shape = RoundedCornerShape(8.dp)
-                                )
-                                ExposedDropdownMenu(
+                                ) {
+                                    Text("মাস: $filterMonth", fontSize = 12.sp)
+                                }
+                                DropdownMenu(
                                     expanded = expandedFilterMonth,
                                     onDismissRequest = { expandedFilterMonth = false }
                                 ) {
@@ -370,81 +401,45 @@ fun ExpensesScreen(
                             onValueChange = { filterYear = it },
                             label = { Text("বছর") },
                             modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(8.dp)
+                            shape = RoundedCornerShape(8.dp),
+                            singleLine = true
                         )
                     }
 
                     Spacer(modifier = Modifier.height(10.dp))
-                    Surface(
-                        color = MadrasaRedSoft,
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text("নির্বাচিত ট্যাবে মোট ($selectedTab):", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = TextDark)
-                                Text("${totalTabAmount.toInt()} ৳", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = MadrasaRed)
-                            }
-                            HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp), color = Color(0xFFFECACA))
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text("ছাত্রদের মাসিক বেতন ও বিদ্যুৎ বিল (আয়):", fontSize = 12.sp, color = Color(0xFF334155))
-                                Text("${periodSalaryAndElectricIncome.toInt()} ৳", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = MadrasaGreen)
-                            }
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text("মুহতামিম জমা (ব্যয়):", fontSize = 12.sp, color = Color(0xFF334155))
-                                Text("${periodMuhtamimJoma.toInt()} ৳", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = MadrasaRed)
-                            }
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text("সাধারণ খরচ (ব্যয়):", fontSize = 12.sp, color = Color(0xFF334155))
-                                Text("${periodGeneralExpense.toInt()} ৳", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = MadrasaRed)
-                            }
-                            HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp), color = Color(0xFFFECACA))
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text("মোট ব্যয় (সাধারণ খরচ + মুহতামিম জমা):", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = TextDark)
-                                Text("${periodTotalExpense.toInt()} ৳", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = MadrasaRed)
-                            }
-                        }
-                    }
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Text("নির্বাচিত সময়কালের মোট আয় (বেতন + বিদ্যুৎ): ${periodSalaryAndElectricIncome.toInt()} ৳", fontSize = 13.sp, color = MadrasaGreen, fontWeight = FontWeight.SemiBold)
+                    Text("নির্বাচিত সময়কালের মোট সাধারণ খরচ: ${periodGeneralExpense.toInt()} ৳", fontSize = 13.sp, color = TextDark)
+                    Text("নির্বাচিত সময়কালের মোট মুহতামিম জমা: ${periodMuhtamimJoma.toInt()} ৳", fontSize = 13.sp, color = MadrasaRed, fontWeight = FontWeight.SemiBold)
+                    Text("মোট ব্যয়: ${periodTotalExpense.toInt()} ৳", fontSize = 13.5.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
 
                     Spacer(modifier = Modifier.height(12.dp))
+
                     Button(
                         onClick = {
-                            val periodTitle = if (isYearly) "$filterYear সাল (বাৎসরিক)" else "$filterMonth $filterYear (মাসিক)"
-                            PdfPrintUtil.generateAndShareExpenseDepositReportPdf(
+                            val titleStr = if (isYearly) "বাৎসরিক হিসাব রিপোর্ট - $filterYear" else "মাসিক হিসাব রিপোর্ট - $filterMonth $filterYear"
+                            PdfPrintUtil.generateAndShareExpensesReportPdf(
                                 context = context,
-                                reportType = selectedTab,
-                                period = periodTitle,
-                                isYearly = isYearly,
-                                list = filteredList,
-                                totalAmount = totalTabAmount
+                                periodTitle = titleStr,
+                                expenses = allPeriodExpenses,
+                                totalIncome = periodSalaryAndElectricIncome,
+                                totalExpense = periodTotalExpense,
+                                netBalance = periodSalaryAndElectricIncome - periodTotalExpense
                             )
                         },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .heightIn(min = 48.dp),
+                            .heightIn(min = 46.dp)
+                            .testTag("download_expenses_pdf_button"),
                         colors = ButtonDefaults.buttonColors(containerColor = MadrasaPrimary, contentColor = Color.White),
                         shape = RoundedCornerShape(10.dp)
                     ) {
                         Icon(Icons.Default.PictureAsPdf, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = if (isYearly) "📊 বাৎসরিক $selectedTab (ব্যয়) রিপোর্ট PDF" else "📄 মাসিক $selectedTab (ব্যয়) রিপোর্ট PDF",
-                            fontSize = 13.sp,
+                            text = if (isYearly) "বাৎসরিক হিসাব PDF ডাউনলোড" else "মাসিক হিসাব PDF ডাউনলোড",
                             fontWeight = FontWeight.Bold
                         )
                     }
@@ -452,27 +447,32 @@ fun ExpensesScreen(
             }
         }
 
-        // List of entries
+        // List Header
         item {
-            Spacer(modifier = Modifier.height(2.dp))
-            Text(
-                text = "$selectedTab তালিকা (${filteredList.size} টি)",
-                fontSize = 17.sp,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "$selectedTab তালিকা (${filteredList.size} টি) — মোট: ${totalTabAmount.toInt()} ৳",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
         }
 
         if (filteredList.isEmpty()) {
             item {
                 MadrasaEmptyState(
                     icon = Icons.Default.ReceiptLong,
-                    title = "কোন হিসাব নেই",
-                    subtitle = "উপরের ফর্ম থেকে নতুন এন্ট্রি যোগ করুন"
+                    title = "কোন $selectedTab এন্ট্রি নেই",
+                    subtitle = "উপরের ফরম থেকে নতুন এন্ট্রি যুক্ত করুন"
                 )
             }
         } else {
-            items(filteredList.reversed()) { exp ->
+            items(filteredList, key = { it.id }) { exp ->
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(14.dp),
@@ -483,32 +483,81 @@ fun ExpensesScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
+                            .padding(14.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Text(text = exp.desc, fontWeight = FontWeight.Bold, fontSize = 15.sp)
                             Text(
-                                text = "${if (exp.date.isNotBlank()) "তারিখ: ${exp.date} • " else ""}${exp.type} (ব্যয়)",
+                                text = exp.desc,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 15.sp,
+                                color = TextDark
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "তারিখ: ${exp.date}",
                                 fontSize = 12.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
+
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                text = "- ${exp.amount.toInt()} ৳",
+                                text = "${exp.amount.toInt()} ৳",
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 16.sp,
-                                color = MadrasaRed
+                                fontSize = 15.5.sp,
+                                color = if (selectedTab == "খরচ") MadrasaPrimary else MadrasaRed
                             )
+                            Spacer(modifier = Modifier.width(8.dp))
                             IconButton(onClick = { onDeleteExpense(exp.id) }) {
-                                Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MadrasaRed)
+                                Icon(Icons.Default.Delete, contentDescription = "মুছুন", tint = MadrasaRed, modifier = Modifier.size(20.dp))
                             }
                         }
                     }
                 }
             }
         }
+    }
+
+    if (showAddHeadDialog) {
+        AlertDialog(
+            onDismissRequest = { showAddHeadDialog = false },
+            title = { Text("নতুন মুহতামিম জমা খাত যোগ করুন", fontWeight = FontWeight.Bold) },
+            text = {
+                OutlinedTextField(
+                    value = customHeadInput,
+                    onValueChange = { customHeadInput = it },
+                    label = { Text("খাতের নাম (যেমন: অনুদান, কিতাব বিক্রয়)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp)
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (customHeadInput.isNotBlank()) {
+                            val newHead = customHeadInput.trim()
+                            if (!defaultMuhtamimHeads.contains(newHead)) {
+                                defaultMuhtamimHeads.add(newHead)
+                            }
+                            selectedMuhtamimHead = newHead
+                            customHeadInput = ""
+                            showAddHeadDialog = false
+                            Toast.makeText(context, "নতুন খাত যোগ করা হয়েছে!", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MadrasaPrimary)
+                ) {
+                    Text("যোগ করুন", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAddHeadDialog = false }) {
+                    Text("বাতিল")
+                }
+            }
+        )
     }
 }

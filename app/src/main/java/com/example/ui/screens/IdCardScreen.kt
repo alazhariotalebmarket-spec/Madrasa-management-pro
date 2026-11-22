@@ -36,6 +36,7 @@ import com.example.ui.theme.MadrasaPrimary
 import com.example.ui.theme.MadrasaSapphire
 import com.example.util.PdfPrintUtil
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun IdCardScreen(
     students: List<StudentEntity>,
@@ -45,176 +46,226 @@ fun IdCardScreen(
     val context = LocalContext.current
     var selectedType by remember { mutableStateOf("student") } // "student" or "teacher"
     var searchQuery by remember { mutableStateOf("") }
+    var selectedClassFilter by remember { mutableStateOf("সকল শ্রেণী") }
+    var expandedClassFilter by remember { mutableStateOf(false) }
+
     var previewStudent by remember { mutableStateOf<StudentEntity?>(null) }
     var previewTeacher by remember { mutableStateOf<TeacherEntity?>(null) }
 
-    Column(
+    val classesList = remember(students) {
+        listOf("সকল শ্রেণী") + students.map { it.cls }.distinct().filter { it.isNotBlank() }
+    }
+
+    val filteredStudents = remember(students, selectedClassFilter, searchQuery) {
+        val list = if (selectedClassFilter == "সকল শ্রেণী") students else students.filter { it.cls == selectedClassFilter }
+        val searched = if (searchQuery.isBlank()) list else list.filter {
+            it.name.contains(searchQuery, ignoreCase = true) || it.roll.contains(searchQuery)
+        }
+        searched.sortedBy { s -> s.roll.toIntOrNull() ?: 9999 }
+    }
+
+    val filteredTeachers = remember(teachers, searchQuery) {
+        if (searchQuery.isBlank()) teachers else teachers.filter {
+            it.name.contains(searchQuery, ignoreCase = true) || it.subject.contains(searchQuery, ignoreCase = true)
+        }
+    }
+
+    LazyColumn(
         modifier = Modifier
             .fillMaxSize()
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // Spec Header Card
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            border = madrasaCardBorder(),
-            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-        ) {
-            Column(modifier = Modifier.padding(14.dp)) {
-                Text(
-                    text = "🪪 আইডি কার্ড (CR80 প্রিন্ট সাইজ)",
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "সাইজ: 54mm × 85.6mm (2.125\" × 3.375\") • 300 DPI (638 × 1012 px) • 2mm ব্লিড ও ক্রপ মার্কসহ",
-                    fontSize = 11.5.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(modifier = Modifier.height(10.dp))
+        item {
+            // Spec Header Card
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = madrasaCardBorder(),
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Text(
+                        text = "🪪 আইডি কার্ড (শ্রেণী ও রোল অনুযায়ী)",
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "CR80 সাইজ: 54mm × 85.6mm • 300 DPI (638 × 1012 px) • PDF ও High-Res PNG",
+                        fontSize = 11.5.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
 
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    border = madrasaCardBorder()
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(4.dp),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        border = madrasaCardBorder()
                     ) {
-                        Button(
-                            onClick = { selectedType = "student" },
+                        Row(
                             modifier = Modifier
-                                .weight(1f)
-                                .heightIn(min = 44.dp)
-                                .testTag("id_tab_student"),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (selectedType == "student") MadrasaPrimary else Color.Transparent,
-                                contentColor = if (selectedType == "student") Color.White else MaterialTheme.colorScheme.onSurface
-                            ),
-                            elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp),
-                            shape = RoundedCornerShape(9.dp)
+                                .fillMaxWidth()
+                                .padding(4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Text("ছাত্র আইডি কার্ড (${students.size})", fontWeight = FontWeight.Bold, fontSize = 12.5.sp)
-                        }
-                        Button(
-                            onClick = { selectedType = "teacher" },
-                            modifier = Modifier
-                                .weight(1f)
-                                .heightIn(min = 44.dp)
-                                .testTag("id_tab_teacher"),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (selectedType == "teacher") MadrasaPrimary else Color.Transparent,
-                                contentColor = if (selectedType == "teacher") Color.White else MaterialTheme.colorScheme.onSurface
-                            ),
-                            elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp),
-                            shape = RoundedCornerShape(9.dp)
-                        ) {
-                            Text("শিক্ষক আইডি কার্ড (${teachers.size})", fontWeight = FontWeight.Bold, fontSize = 12.5.sp)
+                            Button(
+                                onClick = { selectedType = "student" },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(40.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (selectedType == "student") MadrasaPrimary else Color.Transparent,
+                                    contentColor = if (selectedType == "student") Color.White else MaterialTheme.colorScheme.onSurface
+                                ),
+                                elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Text("ছাত্র-ছাত্রী ID", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            }
+
+                            Button(
+                                onClick = { selectedType = "teacher" },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(40.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (selectedType == "teacher") MadrasaSapphire else Color.Transparent,
+                                    contentColor = if (selectedType == "teacher") Color.White else MaterialTheme.colorScheme.onSurface
+                                ),
+                                elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Text("শিক্ষক ID", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            }
                         }
                     }
-                }
 
-                Spacer(modifier = Modifier.height(10.dp))
-                OutlinedTextField(
-                    value = searchQuery,
-                    onValueChange = { searchQuery = it },
-                    label = { Text("নাম, শ্রেণী বা রোল দিয়ে খুঁজুন") },
-                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    shape = RoundedCornerShape(10.dp)
-                )
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (selectedType == "student") {
+                            ExposedDropdownMenuBox(
+                                expanded = expandedClassFilter,
+                                onExpandedChange = { expandedClassFilter = !expandedClassFilter },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                OutlinedTextField(
+                                    value = selectedClassFilter,
+                                    onValueChange = {},
+                                    readOnly = true,
+                                    label = { Text("শ্রেণী ফিল্টার") },
+                                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedClassFilter) },
+                                    modifier = Modifier
+                                        .menuAnchor()
+                                        .fillMaxWidth(),
+                                    shape = RoundedCornerShape(10.dp)
+                                )
+                                ExposedDropdownMenu(
+                                    expanded = expandedClassFilter,
+                                    onDismissRequest = { expandedClassFilter = false }
+                                ) {
+                                    classesList.forEach { cls ->
+                                        DropdownMenuItem(
+                                            text = { Text(cls) },
+                                            onClick = {
+                                                selectedClassFilter = cls
+                                                expandedClassFilter = false
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        OutlinedTextField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            label = { Text("নাম বা রোল দিয়ে খুঁজুন") },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(10.dp),
+                            singleLine = true
+                        )
+                    }
+                }
             }
         }
 
         if (selectedType == "student") {
-            val filtered = students.filter {
-                it.name.contains(searchQuery, ignoreCase = true) ||
-                        it.cls.contains(searchQuery, ignoreCase = true) ||
-                        it.roll.contains(searchQuery, ignoreCase = true)
-            }
-            if (filtered.isEmpty()) {
-                MadrasaEmptyState(
-                    icon = Icons.Default.Badge,
-                    title = "কোন ছাত্র পাওয়া যায়নি",
-                    subtitle = "ভর্তি অপশন থেকে ছাত্র যুক্ত করুন অথবা অনুসন্ধান পরিবর্তন করুন"
-                )
+            if (filteredStudents.isEmpty()) {
+                item {
+                    MadrasaEmptyState(
+                        icon = Icons.Default.Badge,
+                        title = "কোন ছাত্র পাওয়া যায়নি",
+                        subtitle = "ছাত্র ভর্তি করা হলে এখানে আইডি কার্ড তৈরি করতে পারবেন"
+                    )
+                }
             } else {
-                LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    items(filtered, key = { it.id }) { student ->
-                        Card(
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(14.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                            border = madrasaCardBorder()
-                        ) {
-                            Column(modifier = Modifier.padding(12.dp)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    if (student.photoUri.isNotEmpty()) {
-                                        AsyncImage(
-                                            model = student.photoUri,
-                                            contentDescription = student.name,
-                                            modifier = Modifier
-                                                .size(48.dp)
-                                                .clip(CircleShape),
-                                            contentScale = ContentScale.Crop
-                                        )
-                                    } else {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(48.dp)
-                                                .clip(CircleShape)
-                                                .background(MaterialTheme.colorScheme.primaryContainer),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Icon(Icons.Default.Person, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                                        }
-                                    }
-                                    Spacer(modifier = Modifier.width(10.dp))
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(student.name, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                                        val rollTxt = if (student.roll.isNotBlank()) " • রোল: ${student.roll}" else ""
-                                        Text(
-                                            "জামাত: ${student.cls}$rollTxt • আইডি: #IKM-${student.id}",
-                                            fontSize = 12.sp,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                    IconButton(onClick = { previewStudent = student }) {
-                                        Icon(Icons.Default.Visibility, contentDescription = "প্রিভিউ", tint = MaterialTheme.colorScheme.primary)
+                items(filteredStudents, key = { it.id }) { student ->
+                    val rollStr = if (student.roll.isNotBlank()) "রোল: ${student.roll}" else "রোল: -"
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        border = madrasaCardBorder(),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(14.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Surface(
+                                    shape = CircleShape,
+                                    color = MaterialTheme.colorScheme.primaryContainer,
+                                    modifier = Modifier.size(46.dp)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(Icons.Default.Person, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                                     }
                                 }
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(student.name, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                    Text(
+                                        "${student.cls} • $rollStr • পিতা: ${student.father.ifEmpty { "প্রযোজ্য নয়" }}",
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                IconButton(onClick = { previewStudent = student }) {
+                                    Icon(Icons.Default.Visibility, contentDescription = "প্রিভিউ", tint = MaterialTheme.colorScheme.primary)
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Button(
+                                    onClick = { PdfPrintUtil.generateAndShareStudentIdCardPdf(context, student) },
+                                    modifier = Modifier.weight(1f).heightIn(min = 44.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = MadrasaPrimary, contentColor = Color.White),
+                                    shape = RoundedCornerShape(10.dp)
                                 ) {
-                                    Button(
-                                        onClick = { PdfPrintUtil.generateAndShareIdCardPdf(context, student) },
-                                        modifier = Modifier.weight(1f).heightIn(min = 44.dp),
-                                        colors = ButtonDefaults.buttonColors(containerColor = MadrasaPrimary, contentColor = Color.White),
-                                        shape = RoundedCornerShape(10.dp)
-                                    ) {
-                                        Icon(Icons.Default.PictureAsPdf, contentDescription = null, modifier = Modifier.size(16.dp))
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text("CR80 PDF", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                    }
-                                    OutlinedButton(
-                                        onClick = { PdfPrintUtil.generateAndShareCr80IdCardPng(context, student = student) },
-                                        modifier = Modifier.weight(1f),
-                                        shape = RoundedCornerShape(8.dp)
-                                    ) {
-                                        Icon(Icons.Default.Image, contentDescription = null, modifier = Modifier.size(16.dp))
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text("300 DPI PNG", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                    }
+                                    Icon(Icons.Default.PictureAsPdf, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("CR80 PDF", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+                                OutlinedButton(
+                                    onClick = { PdfPrintUtil.generateAndShareCr80IdCardPng(context, student = student) },
+                                    modifier = Modifier.weight(1f),
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Icon(Icons.Default.Image, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("300 DPI PNG", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                 }
                             }
                         }
@@ -222,84 +273,73 @@ fun IdCardScreen(
                 }
             }
         } else {
-            val filtered = teachers.filter {
-                it.name.contains(searchQuery, ignoreCase = true) ||
-                        it.subject.contains(searchQuery, ignoreCase = true)
-            }
-            if (filtered.isEmpty()) {
-                MadrasaEmptyState(
-                    icon = Icons.Default.SupervisorAccount,
-                    title = "কোন শিক্ষক পাওয়া যায়নি",
-                    subtitle = "শিক্ষকের বেতন অপশন থেকে শিক্ষক যুক্ত করুন"
-                )
+            if (filteredTeachers.isEmpty()) {
+                item {
+                    MadrasaEmptyState(
+                        icon = Icons.Default.SupervisorAccount,
+                        title = "কোন শিক্ষক পাওয়া যায়নি",
+                        subtitle = "শিক্ষক যুক্ত করা হলে এখানে আইডি কার্ড তৈরি করতে পারবেন"
+                    )
+                }
             } else {
-                LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    items(filtered, key = { it.id }) { teacher ->
-                        Card(
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(14.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                            border = madrasaCardBorder()
-                        ) {
-                            Column(modifier = Modifier.padding(12.dp)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    if (teacher.photoUri.isNotEmpty()) {
-                                        AsyncImage(
-                                            model = teacher.photoUri,
-                                            contentDescription = teacher.name,
-                                            modifier = Modifier
-                                                .size(48.dp)
-                                                .clip(CircleShape),
-                                            contentScale = ContentScale.Crop
-                                        )
-                                    } else {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(48.dp)
-                                                .clip(CircleShape)
-                                                .background(MaterialTheme.colorScheme.primaryContainer),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Icon(Icons.Default.SupervisorAccount, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                                        }
-                                    }
-                                    Spacer(modifier = Modifier.width(10.dp))
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(teacher.name, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                                        Text(
-                                            "পদবী: ${teacher.subject} • আইডি: #IKM-T${teacher.id}",
-                                            fontSize = 12.sp,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                    IconButton(onClick = { previewTeacher = teacher }) {
-                                        Icon(Icons.Default.Visibility, contentDescription = "প্রিভিউ", tint = MaterialTheme.colorScheme.primary)
+                items(filteredTeachers, key = { it.id }) { teacher ->
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        border = madrasaCardBorder(),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(14.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Surface(
+                                    shape = CircleShape,
+                                    color = MaterialTheme.colorScheme.primaryContainer,
+                                    modifier = Modifier.size(46.dp)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(Icons.Default.SupervisorAccount, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                                     }
                                 }
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(teacher.name, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                    Text(
+                                        "পদবী: ${teacher.subject} • আইডি: #IKM-T${teacher.id}",
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                IconButton(onClick = { previewTeacher = teacher }) {
+                                    Icon(Icons.Default.Visibility, contentDescription = "প্রিভিউ", tint = MaterialTheme.colorScheme.primary)
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Button(
+                                    onClick = { PdfPrintUtil.generateAndShareTeacherIdCardPdf(context, teacher) },
+                                    modifier = Modifier.weight(1f).heightIn(min = 44.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = MadrasaPrimary, contentColor = Color.White),
+                                    shape = RoundedCornerShape(10.dp)
                                 ) {
-                                    Button(
-                                        onClick = { PdfPrintUtil.generateAndShareTeacherIdCardPdf(context, teacher) },
-                                        modifier = Modifier.weight(1f).heightIn(min = 44.dp),
-                                        colors = ButtonDefaults.buttonColors(containerColor = MadrasaPrimary, contentColor = Color.White),
-                                        shape = RoundedCornerShape(10.dp)
-                                    ) {
-                                        Icon(Icons.Default.PictureAsPdf, contentDescription = null, modifier = Modifier.size(16.dp))
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text("CR80 PDF", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                    }
-                                    OutlinedButton(
-                                        onClick = { PdfPrintUtil.generateAndShareCr80IdCardPng(context, teacher = teacher) },
-                                        modifier = Modifier.weight(1f),
-                                        shape = RoundedCornerShape(8.dp)
-                                    ) {
-                                        Icon(Icons.Default.Image, contentDescription = null, modifier = Modifier.size(16.dp))
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text("300 DPI PNG", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                    }
+                                    Icon(Icons.Default.PictureAsPdf, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("CR80 PDF", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+                                OutlinedButton(
+                                    onClick = { PdfPrintUtil.generateAndShareCr80IdCardPng(context, teacher = teacher) },
+                                    modifier = Modifier.weight(1f),
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Icon(Icons.Default.Image, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("300 DPI PNG", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                 }
                             }
                         }
@@ -369,7 +409,7 @@ fun TeacherIdCardDialog(
         text = {
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = Color.White),
                 elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
             ) {
@@ -418,63 +458,40 @@ fun TeacherIdCardDialog(
                     ) {
                         Text(
                             text = "শিক্ষক পরিচিতি কার্ড • CR80 (54×85.6mm + 2mm ব্লিড)",
-                            fontSize = 10.sp,
+                            fontSize = 9.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color(0xFF062C1B)
                         )
                     }
 
-                    Column(
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    Box(
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(14.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
+                            .size(100.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.surfaceVariant),
+                        contentAlignment = Alignment.Center
                     ) {
-                        if (teacher.photoUri.isNotEmpty()) {
+                        if (teacher.photoUri.isNotBlank()) {
                             AsyncImage(
                                 model = teacher.photoUri,
-                                contentDescription = teacher.name,
-                                modifier = Modifier
-                                    .size(74.dp)
-                                    .clip(CircleShape),
-                                contentScale = ContentScale.Crop
+                                contentDescription = null,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
                             )
                         } else {
-                            Box(
-                                modifier = Modifier
-                                    .size(74.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(0xFFE6F4FA)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(Icons.Default.Person, contentDescription = null, tint = headerBlue, modifier = Modifier.size(42.dp))
-                            }
+                            Icon(Icons.Default.SupervisorAccount, contentDescription = null, modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.primary)
                         }
-
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(teacher.name, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = headerBlue)
-                        Surface(
-                            color = Color(0xFFE6F4FA),
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            Text(
-                                text = "পদবী: ${teacher.subject}",
-                                fontSize = 11.5.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = headerBlue,
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 3.dp)
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.height(10.dp))
-                        HorizontalDivider(color = Color(0xFFE2E8F0))
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        IdCardInfoRow(label = "আইডি নং:", value = "#IKM-T${teacher.id}")
-                        IdCardInfoRow(label = "মোবাইল:", value = teacher.phone.ifEmpty { "নেই" })
-                        IdCardInfoRow(label = "যোগদান:", value = teacher.joinDate.ifEmpty { "প্রযোজ্য নয়" })
-                        IdCardInfoRow(label = "ঠিকানা:", value = teacher.address.ifEmpty { "মাদ্রাসা ক্যাম্পাস" })
                     }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Text(text = teacher.name, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
+                    Text(text = "পদবী/বিষয়: ${teacher.subject}", fontSize = 13.sp, color = Color(0xFF475569))
+                    Text(text = "মোবাইল: ${teacher.phone.ifEmpty { "নেই" }}", fontSize = 12.sp, color = Color(0xFF64748B))
+
+                    Spacer(modifier = Modifier.height(16.dp))
                 }
             }
         }
