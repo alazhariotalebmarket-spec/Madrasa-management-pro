@@ -59,6 +59,7 @@ import com.google.android.gms.common.api.ApiException
 import com.google.android.gms.common.api.CommonStatusCodes
 import com.google.android.gms.common.api.Scope
 import com.google.firebase.Firebase
+import com.google.firebase.FirebaseApp
 import com.google.firebase.auth.OAuthCredential
 import com.google.firebase.auth.OAuthProvider
 import com.google.firebase.auth.auth
@@ -335,7 +336,14 @@ fun BackupScreen(
     }
 
     LaunchedEffect(Unit) {
-        val pendingTask = try { Firebase.auth.pendingAuthResult } catch (_: Exception) { null }
+        if (FirebaseApp.getApps(context).isEmpty()) {
+            FirebaseApp.initializeApp(context)
+        }
+        val pendingTask = try {
+            if (FirebaseApp.getApps(context).isNotEmpty()) Firebase.auth.pendingAuthResult else null
+        } catch (_: Exception) {
+            null
+        }
         if (pendingTask != null) {
             pendingTask
                 .addOnSuccessListener { authRes ->
@@ -367,6 +375,17 @@ fun BackupScreen(
             return
         }
         try {
+            if (FirebaseApp.getApps(context).isEmpty()) {
+                FirebaseApp.initializeApp(context)
+            }
+            if (FirebaseApp.getApps(context).isEmpty()) {
+                isConnecting = false
+                clearLocalConnectionState()
+                showSha1Diagnostic = true
+                connectionError = "${priorReason.ifBlank { "Google Sign-In" }}\nFirebaseApp কনফিগারেশন পাওয়া যায়নি (google-services.json পরীক্ষা করুন)"
+                Toast.makeText(context, connectionError, Toast.LENGTH_LONG).show()
+                return
+            }
             val provider = OAuthProvider.newBuilder("google.com")
                 .setScopes(listOf(DRIVE_APPDATA_SCOPE))
                 .addCustomParameter("prompt", "select_account consent")
@@ -606,7 +625,9 @@ fun BackupScreen(
             }
             withContext(Dispatchers.Main) {
                 try {
-                    Firebase.auth.signOut()
+                    if (FirebaseApp.getApps(context).isNotEmpty()) {
+                        Firebase.auth.signOut()
+                    }
                 } catch (_: Exception) {
                 }
                 try {
