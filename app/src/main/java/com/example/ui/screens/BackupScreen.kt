@@ -36,6 +36,20 @@ import com.example.ui.theme.MadrasaGreen
 import com.example.ui.theme.MadrasaPrimary
 import com.example.ui.viewmodel.MadrasaViewModel
 import com.example.util.PdfPrintUtil
+import com.google.android.gms.auth.GoogleAuthUtil
+import com.google.android.gms.auth.api.signin.GoogleSignIn
+import com.google.android.gms.auth.api.signin.GoogleSignInAccount
+import com.google.android.gms.auth.api.signin.GoogleSignInClient
+import com.google.android.gms.auth.api.signin.GoogleSignInOptions
+import com.google.android.gms.common.api.Scope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MultipartBody
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -49,6 +63,7 @@ fun BackupScreen(
     viewModel: MadrasaViewModel
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val students by viewModel.students.collectAsState()
     val fees by viewModel.fees.collectAsState()
     val results by viewModel.results.collectAsState()
@@ -59,11 +74,125 @@ fun BackupScreen(
     val madrasaInfo by viewModel.madrasaInfo.collectAsState()
 
     val prefs = remember { context.getSharedPreferences("google_drive_backup_prefs", android.content.Context.MODE_PRIVATE) }
-    var isGoogleConnected by remember { mutableStateOf(prefs.getBoolean("is_connected", false)) }
-    var connectedEmail by remember { mutableStateOf(prefs.getString("connected_email", "ferdausharfin@gmail.com") ?: "ferdausharfin@gmail.com") }
+    var isGoogleConnected by remember { mutableStateOf(false) }
+    var connectedEmail by remember { mutableStateOf("") }
+    var isCheckingConnection by remember { mutableStateOf(true) }
+    var isUploading by remember { mutableStateOf(false) }
     var lastBackupTime by remember { mutableStateOf(prefs.getString("last_backup_time", "কখনো ব্যাকআপ করা হয়নি") ?: "কখনো ব্যাকআপ করা হয়নি") }
     var autoBackupFreq by remember { mutableStateOf(prefs.getString("auto_backup_freq", "প্রতিদিন") ?: "প্রতিদিন") }
-    var showLoginDialog by remember { mutableStateOf(false) }
+
+    val gso = remember {
+        GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+            .requestEmail()
+            .requestScopes(
+                Scope("https://www.googleapis.com/auth/drive.file"),
+                Scope("https://www.googleapis.com/auth/drive.appdata")
+            )
+            .build()
+    }
+    val googleSignInClient = remember { GoogleSignIn.getClient(context, gso) }
+
+    // Test Connection on Startup
+    LaunchedEffect(Unit) {
+        isCheckingConnection = true
+        withContext(Dispatchers.IO) {
+            try {
+                val account = GoogleSignIn.getLastSignedInAccount(context)
+                if (account != null && account.account != null) {
+                    val token = GoogleAuthUtil.getToken(
+                        context,
+                        account.account!!,
+                        "oauth2:https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.appdata"
+                    )
+                    if (!token.isNullOrBlank()) {
+                        // Verify token with Google Drive API
+                        val client = OkHttpClient()
+                        val req = Request.Builder()
+                            .url("https://www.googleapis.com/drive/v3/about?fields=user")
+                            .addHeader("Authorization", "Bearer $token")
+                            .get()
+                            .build()
+                        val res = client.newCall(req).execute()
+                        if (res.isSuccessful) {
+                            withContext(Dispatchers.Main) {
+                                isGoogleConnected = true
+                                connectedEmail = account.email.orEmpty()
+                                prefs.edit().putBoolean("is_connected", true).putString("connected_email", connectedEmail).apply()
+                            }
+                        } else {
+                            // Token expired or invalid
+                            googleSignInClient.signOut()
+                            withContext(Dispatchers.Main) {
+                                isGoogleConnected = false
+                                connectedEmail = ""
+                                prefs.edit().putBoolean("is_connected", false).remove("connected_email").apply()
+                            }
+                        }
+                    } else {
+                        withContext(Dispatchers.Main) {
+                            isGoogleConnected = false
+                            connectedEmail = ""
+                            prefs.edit().putBoolean("is_connected", false).remove("connected_email").apply()
+                        }
+                    }
+                } else {
+                    withContext(Dispatchers.Main) {
+                        isGoogleConnected = false
+                        connectedEmail = ""
+                        prefs.edit().putBoolean("is_connected", false).remove("connected_email").apply()
+                    }
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    isGoogleConnected = false
+                    connectedEmail = ""
+                    prefs.edit().putBoolean("is_connected", false).remove("connected_email").apply()
+                }
+            } finally {
+                withContext(Dispatchers.Main) {
+                    isCheckingConnection = false
+                }
+            }
+        }
+    }
+
+    val signInLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
+        try {
+            val account = task.getResult(Exception::class.java)
+            if (account != null && account.account != null) {
+                scope.launch(Dispatchers.IO) {
+                    try {
+                        val token = GoogleAuthUtil.getToken(
+                            context,
+                            account.account!!,
+                            "oauth2:https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.appdata"
+                        )
+                        if (!token.isNullOrBlank()) {
+                            withContext(Dispatchers.Main) {
+                                isGoogleConnected = true
+                                connectedEmail = account.email.orEmpty()
+                                prefs.edit().putBoolean("is_connected", true).putString("connected_email", connectedEmail).apply()
+                                Toast.makeText(context, "Google Drive Connected ($connectedEmail)!", Toast.LENGTH_SHORT).show()
+                            }
+                        } else {
+                            withContext(Dispatchers.Main) {
+                                Toast.makeText(context, "Google Drive Sign-In failed: Token missing", Toast.LENGTH_LONG).show()
+                            }
+                        }
+                    } catch (e: Exception) {
+                        withContext(Dispatchers.Main) {
+                            Toast.makeText(context, "Google Drive Sign-In error: ${e.message}", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Toast.makeText(context, "Google Sign-In denied or failed: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
 
     fun createBackupJson(): String {
         val root = JSONObject()
@@ -172,59 +301,84 @@ fun BackupScreen(
         return root.toString(2)
     }
 
-    fun saveBackupToFile(jsonContent: String): File {
-        val dateSuffix = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
-        val backupFile = File(context.cacheDir, "MadrasaMPro_Drive_Backup_$dateSuffix.json")
-        FileOutputStream(backupFile).use { out ->
-            out.write(jsonContent.toByteArray(Charsets.UTF_8))
-        }
-        return backupFile
-    }
-
-    fun prepareApkCacheFile(): File {
-        val sourceApk = File(context.applicationInfo.sourceDir)
-        val cachedApk = File(context.cacheDir, "Madrasa_M_PRO.apk")
-        FileInputStream(sourceApk).use { input ->
-            FileOutputStream(cachedApk).use { output ->
-                input.copyTo(output)
-            }
-        }
-        return cachedApk
-    }
-
-    val saveApkDocumentLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.CreateDocument("application/vnd.android.package-archive")
-    ) { targetUri ->
-        if (targetUri != null) {
+    suspend fun uploadToGoogleDrive(jsonContent: String): Boolean {
+        return withContext(Dispatchers.IO) {
             try {
-                val sourceApk = File(context.applicationInfo.sourceDir)
-                context.contentResolver.openOutputStream(targetUri)?.use { output ->
-                    FileInputStream(sourceApk).use { input ->
-                        input.copyTo(output)
+                val account = GoogleSignIn.getLastSignedInAccount(context) ?: return@withContext false
+                val token = GoogleAuthUtil.getToken(
+                    context,
+                    account.account!!,
+                    "oauth2:https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.appdata"
+                ) ?: return@withContext false
+
+                val client = OkHttpClient()
+                val mediaTypeJson = "application/json; charset=utf-8".toMediaType()
+
+                // 1. Find or create folder "Madrasa M PRO"
+                val searchUrl = "https://www.googleapis.com/drive/v3/files?q=name='Madrasa M PRO' and mimeType='application/vnd.google-apps.folder' and trashed=false"
+                val searchReq = Request.Builder()
+                    .url(searchUrl)
+                    .addHeader("Authorization", "Bearer $token")
+                    .get()
+                    .build()
+
+                val searchRes = client.newCall(searchReq).execute()
+                var folderId: String? = null
+                if (searchRes.isSuccessful) {
+                    val bodyStr = searchRes.body?.string().orEmpty()
+                    val json = JSONObject(bodyStr)
+                    val files = json.optJSONArray("files")
+                    if (files != null && files.length() > 0) {
+                        folderId = files.getJSONObject(0).optString("id")
                     }
                 }
-                Toast.makeText(context, "APK ফাইল সফলভাবে সেভ হয়েছে!", Toast.LENGTH_LONG).show()
-            } catch (e: Exception) {
-                Toast.makeText(context, "APK সেভ করতে ত্রুটি: ${e.message}", Toast.LENGTH_SHORT).show()
-            }
-        }
-    }
 
-    val saveDriveJsonLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.CreateDocument("application/json")
-    ) { targetUri ->
-        if (targetUri != null) {
-            try {
-                val jsonString = createBackupJson()
-                context.contentResolver.openOutputStream(targetUri)?.use { output ->
-                    output.write(jsonString.toByteArray(Charsets.UTF_8))
+                if (folderId.isNullOrBlank()) {
+                    val createFolderUrl = "https://www.googleapis.com/drive/v3/files"
+                    val folderMeta = JSONObject().apply {
+                        put("name", "Madrasa M PRO")
+                        put("mimeType", "application/vnd.google-apps.folder")
+                    }
+                    val createReq = Request.Builder()
+                        .url(createFolderUrl)
+                        .addHeader("Authorization", "Bearer $token")
+                        .addHeader("Content-Type", "application/json")
+                        .post(folderMeta.toString().toRequestBody(mediaTypeJson))
+                        .build()
+                    val createRes = client.newCall(createReq).execute()
+                    if (createRes.isSuccessful) {
+                        val createBody = createRes.body?.string().orEmpty()
+                        folderId = JSONObject(createBody).optString("id")
+                    }
                 }
-                val timeNow = SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.getDefault()).format(Date())
-                lastBackupTime = timeNow
-                prefs.edit().putString("last_backup_time", timeNow).apply()
-                Toast.makeText(context, "Backup Successful! (Madrasa M PRO ফোল্ডার)", Toast.LENGTH_LONG).show()
+
+                if (folderId.isNullOrBlank()) return@withContext false
+
+                // 2. Upload file
+                val dateSuffix = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+                val fileName = "MadrasaMPro_Backup_$dateSuffix.json"
+                val uploadUrl = "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart"
+                val metadata = JSONObject().apply {
+                    put("name", fileName)
+                    put("parents", JSONArray().put(folderId))
+                }
+
+                val requestBody = MultipartBody.Builder()
+                    .setType(MultipartBody.FORM)
+                    .addFormDataPart("metadata", null, metadata.toString().toRequestBody("application/json; charset=UTF-8".toMediaType()))
+                    .addFormDataPart("file", fileName, jsonContent.toRequestBody("application/json; charset=UTF-8".toMediaType()))
+                    .build()
+
+                val uploadReq = Request.Builder()
+                    .url(uploadUrl)
+                    .addHeader("Authorization", "Bearer $token")
+                    .post(requestBody)
+                    .build()
+
+                val uploadRes = client.newCall(uploadReq).execute()
+                uploadRes.isSuccessful
             } catch (e: Exception) {
-                Toast.makeText(context, "সংরক্ষণে ত্রুটি: ${e.message}", Toast.LENGTH_SHORT).show()
+                false
             }
         }
     }
@@ -291,7 +445,7 @@ fun BackupScreen(
                                 color = MaterialTheme.colorScheme.primary
                             )
                             Text(
-                                text = if (isGoogleConnected) "সংযুক্ত: $connectedEmail" else "গুগল ড্রাইভ সিঙ্ক নিষ্ক্রিয়",
+                                text = if (isCheckingConnection) "সংযোগ যাচাই করা হচ্ছে..." else if (isGoogleConnected) "সংযুক্ত: $connectedEmail" else "গুগল ড্রাইভ সিঙ্ক নিষ্ক্রিয়",
                                 fontSize = 12.sp,
                                 color = if (isGoogleConnected) MadrasaGreen else MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -300,7 +454,10 @@ fun BackupScreen(
 
                     if (!isGoogleConnected) {
                         Button(
-                            onClick = { showLoginDialog = true },
+                            onClick = {
+                                val signInIntent = googleSignInClient.signInIntent
+                                signInLauncher.launch(signInIntent)
+                            },
                             colors = ButtonDefaults.buttonColors(containerColor = MadrasaPrimary),
                             shape = RoundedCornerShape(8.dp),
                             modifier = Modifier.testTag("google_login_button")
@@ -310,9 +467,14 @@ fun BackupScreen(
                     } else {
                         OutlinedButton(
                             onClick = {
-                                isGoogleConnected = false
-                                prefs.edit().putBoolean("is_connected", false).apply()
-                                Toast.makeText(context, "Google Drive Disconnected", Toast.LENGTH_SHORT).show()
+                                googleSignInClient.signOut().addOnCompleteListener {
+                                    googleSignInClient.revokeAccess().addOnCompleteListener {
+                                        isGoogleConnected = false
+                                        connectedEmail = ""
+                                        prefs.edit().putBoolean("is_connected", false).remove("connected_email").apply()
+                                        Toast.makeText(context, "Google Drive Disconnected", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
                             },
                             shape = RoundedCornerShape(8.dp)
                         ) {
@@ -347,22 +509,32 @@ fun BackupScreen(
                     ) {
                         Button(
                             onClick = {
-                                try {
-                                    val jsonString = createBackupJson()
-                                    val backupFile = saveBackupToFile(jsonString)
-                                    val timeNow = SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.getDefault()).format(Date())
-                                    lastBackupTime = timeNow
-                                    prefs.edit().putString("last_backup_time", timeNow).apply()
-
-                                    Toast.makeText(
-                                        context,
-                                        "Backup Successful! 'Madrasa M PRO' ফোল্ডারে সেভ হয়েছে ($timeNow)",
-                                        Toast.LENGTH_LONG
-                                    ).show()
-                                } catch (e: Exception) {
-                                    Toast.makeText(context, "Drive Backup Error: ${e.message}", Toast.LENGTH_SHORT).show()
+                                if (isUploading) return@Button
+                                isUploading = true
+                                scope.launch {
+                                    try {
+                                        val jsonString = createBackupJson()
+                                        val success = uploadToGoogleDrive(jsonString)
+                                        if (success) {
+                                            val timeNow = SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.getDefault()).format(Date())
+                                            lastBackupTime = timeNow
+                                            prefs.edit().putString("last_backup_time", timeNow).apply()
+                                            Toast.makeText(
+                                                context,
+                                                "Backup Successful! Google Drive এর 'Madrasa M PRO' ফোল্ডারে আপলোড হয়েছে ($timeNow)",
+                                                Toast.LENGTH_LONG
+                                            ).show()
+                                        } else {
+                                            Toast.makeText(context, "Drive Backup Error: Upload failed or permission denied", Toast.LENGTH_LONG).show()
+                                        }
+                                    } catch (e: Exception) {
+                                        Toast.makeText(context, "Drive Backup Error: ${e.message}", Toast.LENGTH_LONG).show()
+                                    } finally {
+                                        isUploading = false
+                                    }
                                 }
                             },
+                            enabled = !isUploading,
                             modifier = Modifier
                                 .weight(1f)
                                 .heightIn(min = 46.dp)
@@ -370,9 +542,13 @@ fun BackupScreen(
                             colors = ButtonDefaults.buttonColors(containerColor = MadrasaPrimary),
                             shape = RoundedCornerShape(10.dp)
                         ) {
-                            Icon(Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(18.dp))
+                            if (isUploading) {
+                                CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
+                            } else {
+                                Icon(Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(18.dp))
+                            }
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Backup to Drive", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            Text(if (isUploading) "Uploading..." else "Backup to Drive", fontSize = 13.sp, fontWeight = FontWeight.Bold)
                         }
 
                         Button(
@@ -395,39 +571,11 @@ fun BackupScreen(
                             Text("Restore", fontSize = 13.sp, fontWeight = FontWeight.Bold)
                         }
                     }
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("অটো ব্যাকআপ ফ্রিকোয়েন্সি:", fontSize = 13.sp, fontWeight = FontWeight.Medium)
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            listOf("প্রতিদিন", "প্রতি সপ্তাহে").forEach { freq ->
-                                OutlinedButton(
-                                    onClick = {
-                                        autoBackupFreq = freq
-                                        prefs.edit().putString("auto_backup_freq", freq).apply()
-                                        Toast.makeText(context, "অটো ব্যাকআপ সেট করা হয়েছে: $freq", Toast.LENGTH_SHORT).show()
-                                    },
-                                    colors = ButtonDefaults.outlinedButtonColors(
-                                        containerColor = if (autoBackupFreq == freq) MadrasaPrimary.copy(alpha = 0.12f) else Color.Transparent
-                                    ),
-                                    shape = RoundedCornerShape(8.dp),
-                                    modifier = Modifier.height(36.dp)
-                                ) {
-                                    Text(freq, fontSize = 11.sp, fontWeight = if (autoBackupFreq == freq) FontWeight.Bold else FontWeight.Normal)
-                                }
-                            }
-                        }
-                    }
                 }
             }
         }
 
-        // App APK Download & Share Card
+        // Local Export / Share Card
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(16.dp),
@@ -435,118 +583,105 @@ fun BackupScreen(
             border = madrasaCardBorder(),
             elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
         ) {
-            Column(modifier = Modifier.padding(18.dp)) {
+            Column(modifier = Modifier.padding(16.dp)) {
                 Text(
-                    text = "📲 Madrasa M PRO (APK) ডাউনলোড ও শেয়ার",
-                    fontSize = 17.sp,
+                    text = "📥 স্থানীয় ব্যাকআপ ও রিস্টোর (Device Storage)",
+                    fontSize = 15.sp,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.primary
                 )
-                Spacer(modifier = Modifier.height(6.dp))
+                Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "অ্যাপের ইনস্টলার (APK) ফাইলটি সরাসরি আপনার ফোনের Downloads ফোল্ডারে সেভ করুন অথবা অন্য ডিভাইসে শেয়ার করুন।",
-                    fontSize = 13.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    lineHeight = 18.sp
+                    text = "আপনার ফোনের মেমোরিতে JSON ফাইল হিসেবে ব্যাকআপ সেভ করুন অথবা অন্য ডিভাইসে শেয়ার করুন।",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                Spacer(modifier = Modifier.height(14.dp))
-
-                Button(
-                    onClick = {
-                        try {
-                            val cachedApk = prepareApkCacheFile()
-                            val savedUri = PdfPrintUtil.saveFileToDownloads(
-                                context = context,
-                                sourceFile = cachedApk,
-                                displayName = "Madrasa_M_PRO.apk",
-                                mimeType = "application/vnd.android.package-archive"
-                            )
-                            if (savedUri != null) {
-                                Toast.makeText(
-                                    context,
-                                    "APK ফাইল Downloads/MadrasaPro ফোল্ডারে ডাউনলোড হয়েছে!",
-                                    Toast.LENGTH_LONG
-                                ).show()
-                            } else {
-                                saveApkDocumentLauncher.launch("Madrasa_M_PRO.apk")
-                            }
-                        } catch (e: Exception) {
-                            Toast.makeText(context, "ডাউনলোডে ত্রুটি: ${e.message}", Toast.LENGTH_SHORT).show()
-                        }
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 48.dp)
-                        .testTag("download_apk_button"),
-                    colors = ButtonDefaults.buttonColors(containerColor = MadrasaPrimary, contentColor = Color.White),
-                    shape = RoundedCornerShape(10.dp)
-                ) {
-                    Icon(Icons.Default.Download, contentDescription = null)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("APK ডাউনলোড করুন (Downloads)", fontSize = 14.5.sp, fontWeight = FontWeight.Bold)
-                }
-
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    OutlinedButton(
+                    val saveDriveJsonLauncher = rememberLauncherForActivityResult(
+                        contract = ActivityResultContracts.CreateDocument("application/json")
+                    ) { targetUri ->
+                        if (targetUri != null) {
+                            try {
+                                val jsonString = createBackupJson()
+                                context.contentResolver.openOutputStream(targetUri)?.use { output ->
+                                    output.write(jsonString.toByteArray(Charsets.UTF_8))
+                                }
+                                val timeNow = SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.getDefault()).format(Date())
+                                lastBackupTime = timeNow
+                                prefs.edit().putString("last_backup_time", timeNow).apply()
+                                Toast.makeText(context, "Local Backup Successful!", Toast.LENGTH_LONG).show()
+                            } catch (e: Exception) {
+                                Toast.makeText(context, "সংরক্ষণে ত্রুটি: ${e.message}", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    }
+
+                    Button(
                         onClick = {
-                            saveApkDocumentLauncher.launch("Madrasa_M_PRO.apk")
+                            val dateSuffix = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+                            saveDriveJsonLauncher.launch("MadrasaMPro_Backup_$dateSuffix.json")
                         },
                         modifier = Modifier
                             .weight(1f)
-                            .testTag("save_apk_as_button"),
+                            .heightIn(min = 44.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = MadrasaPrimary),
                         shape = RoundedCornerShape(10.dp)
                     ) {
-                        Text("অন্য ফোল্ডারে সেভ", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Export JSON", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
 
                     Button(
                         onClick = {
                             try {
-                                val cachedApk = prepareApkCacheFile()
-                                val apkUri = FileProvider.getUriForFile(
+                                val jsonString = createBackupJson()
+                                val backupFile = File(context.cacheDir, "MadrasaMPro_Share_Backup.json")
+                                FileOutputStream(backupFile).use { out ->
+                                    out.write(jsonString.toByteArray(Charsets.UTF_8))
+                                }
+                                val shareUri = FileProvider.getUriForFile(
                                     context,
                                     "${context.packageName}.fileprovider",
-                                    cachedApk
+                                    backupFile
                                 )
-                                val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                                    type = "application/vnd.android.package-archive"
-                                    putExtra(Intent.EXTRA_STREAM, apkUri)
-                                    putExtra(Intent.EXTRA_SUBJECT, "Madrasa M PRO (APK)")
+                                val intent = Intent(Intent.ACTION_SEND).apply {
+                                    type = "application/json"
+                                    putExtra(Intent.EXTRA_STREAM, shareUri)
+                                    putExtra(Intent.EXTRA_SUBJECT, "Madrasa M PRO Backup")
                                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                                 }
-                                context.startActivity(
-                                    Intent.createChooser(shareIntent, "APK ফাইল শেয়ার করুন")
-                                )
+                                context.startActivity(Intent.createChooser(intent, "শেয়ার করুন"))
                             } catch (e: Exception) {
-                                Toast.makeText(context, "শেয়ার করতে ত্রুটি: ${e.message}", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, "শেয়ার করতে ত্রুটি: ${e.message}", Toast.LENGTH_SHORT).show()
                             }
                         },
                         modifier = Modifier
                             .weight(1f)
-                            .testTag("share_apk_button"),
+                            .heightIn(min = 44.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = MadrasaAccent),
                         shape = RoundedCornerShape(10.dp)
                     ) {
-                        Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("APK শেয়ার", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Share Backup", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
         }
 
-        // Summary Card of Current Data
+        // Stats Card
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
             border = madrasaCardBorder(),
-            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text(
@@ -564,52 +699,6 @@ fun BackupScreen(
                 BackupStatRow(label = "নোটিশ সংখ্যা:", count = "${notices.size} টি")
             }
         }
-    }
-
-    if (showLoginDialog) {
-        var emailInput by remember { mutableStateOf("ferdausharfin@gmail.com") }
-        AlertDialog(
-            onDismissRequest = { showLoginDialog = false },
-            title = { Text("Google Drive Login", fontWeight = FontWeight.Bold) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("গুগল অ্যাকাউন্ট দিয়ে কানেক্ট করুন যাতে 'Madrasa M PRO' ফোল্ডারে ক্লাউড ব্যাকআপ সিঙ্ক হতে পারে।", fontSize = 13.sp)
-                    Spacer(modifier = Modifier.height(4.dp))
-                    OutlinedTextField(
-                        value = emailInput,
-                        onValueChange = { emailInput = it },
-                        label = { Text("Google Email") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(10.dp)
-                    )
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        if (emailInput.isNotBlank()) {
-                            connectedEmail = emailInput.trim()
-                            isGoogleConnected = true
-                            prefs.edit()
-                                .putBoolean("is_connected", true)
-                                .putString("connected_email", connectedEmail)
-                                .apply()
-                            Toast.makeText(context, "Google Drive Connected ($connectedEmail)!", Toast.LENGTH_SHORT).show()
-                            showLoginDialog = false
-                        }
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = MadrasaPrimary)
-                ) {
-                    Text("Sign In & Connect", fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showLoginDialog = false }) {
-                    Text("বাতিল")
-                }
-            }
-        )
     }
 }
 
