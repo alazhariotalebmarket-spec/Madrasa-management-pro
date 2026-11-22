@@ -7,6 +7,8 @@ import android.graphics.*
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.os.Handler
+import android.os.Looper
 import android.provider.MediaStore
 import android.text.Layout
 import android.text.StaticLayout
@@ -18,8 +20,12 @@ import com.example.data.MadrasaInfoStore
 import com.example.data.entity.NoticeEntity
 import java.io.File
 import java.io.FileOutputStream
+import java.util.concurrent.Executors
 
 object NoticeImageUtil {
+
+    private val imageExecutor = Executors.newSingleThreadExecutor()
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     private const val MADRASA_NAME = "ইসহাকিয়া কেরাতুল কোরআন নূরানী ও হাফেজিয়া মাদ্রাসা"
     private const val MADRASA_ADDRESS = "পশ্চিম তুষখালী, ছোটবিঘাই, পটুয়াখালী সদর, পটুয়াখালী"
@@ -150,6 +156,8 @@ object NoticeImageUtil {
                 val scaledLogo = Bitmap.createScaledBitmap(srcLogo, logoSize, logoSize, true)
                 val logoTop = 40f + (headerBottom - 40f - logoSize) / 2f
                 canvas.drawBitmap(scaledLogo, 62f, logoTop, null)
+                if (scaledLogo != srcLogo) srcLogo.recycle()
+                scaledLogo.recycle()
             }
         } catch (_: Exception) {}
 
@@ -282,64 +290,91 @@ object NoticeImageUtil {
      * AND Downloads/MadrasaPro folder, then launches the system share/viewer chooser.
      */
     fun saveAndShareNoticePhoto(context: Context, notice: NoticeEntity) {
-        try {
-            val bitmap = createNoticePosterBitmap(context, notice)
-            val fileName = "Notice_${notice.id}_${notice.date.replace("/", "-")}.png"
+        val appContext = context.applicationContext
+        Toast.makeText(context, "নোটিশ ফটো তৈরি হচ্ছে...", Toast.LENGTH_SHORT).show()
+        imageExecutor.execute {
+            var bitmap: Bitmap? = null
+            try {
+                bitmap = createNoticePosterBitmap(appContext, notice)
+                val fileName = "Notice_${notice.id}_${notice.date.replace("/", "-")}.png"
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                val values = ContentValues().apply {
-                    put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
-                    put(MediaStore.Images.Media.MIME_TYPE, "image/png")
-                    put(MediaStore.Images.Media.RELATIVE_PATH, "${Environment.DIRECTORY_PICTURES}/MadrasaNotices")
-                    put(MediaStore.Images.Media.IS_PENDING, 1)
-                }
-                val resolver = context.contentResolver
-                val collection = MediaStore.Images.Media.EXTERNAL_CONTENT_URI
-                val itemUri = resolver.insert(collection, values)
-                if (itemUri != null) {
-                    resolver.openOutputStream(itemUri)?.use { out ->
-                        bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    val values = ContentValues().apply {
+                        put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
+                        put(MediaStore.Images.Media.MIME_TYPE, "image/png")
+                        put(MediaStore.Images.Media.RELATIVE_PATH, "${Environment.DIRECTORY_PICTURES}/MadrasaNotices")
+                        put(MediaStore.Images.Media.IS_PENDING, 1)
                     }
-                    values.clear()
-                    values.put(MediaStore.Images.Media.IS_PENDING, 0)
-                    resolver.update(itemUri, values, null, null)
+                    val resolver = appContext.contentResolver
+                    val collection = MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+                    val itemUri = resolver.insert(collection, values)
+                    if (itemUri != null) {
+                        resolver.openOutputStream(itemUri)?.use { out ->
+                            bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+                        }
+                        values.clear()
+                        values.put(MediaStore.Images.Media.IS_PENDING, 0)
+                        resolver.update(itemUri, values, null, null)
+                    }
+                }
+
+                val cacheFile = File(appContext.cacheDir, fileName)
+                FileOutputStream(cacheFile).use { out ->
+                    bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+                }
+
+                PdfPrintUtil.saveFileToDownloads(appContext, cacheFile, fileName, "image/png")
+
+                val shareUri = FileProvider.getUriForFile(
+                    appContext,
+                    "${appContext.packageName}.fileprovider",
+                    cacheFile
+                )
+
+                val madrasaInfo = MadrasaInfoStore.getInfo(appContext)
+                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                    type = "image/png"
+                    putExtra(Intent.EXTRA_STREAM, shareUri)
+                    putExtra(Intent.EXTRA_SUBJECT, "মাদ্রাসা নোটিশ - ${notice.title}")
+                    putExtra(
+                        Intent.EXTRA_TEXT,
+                        "${madrasaInfo.name}\nনোটিশ: ${notice.title}\nতারিখ: ${notice.date}\n\n${notice.description}"
+                    )
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+
+                mainHandler.post {
+                    Toast.makeText(
+                        appContext,
+                        "হাই-রেজুলেশন নোটিশ ফটো গ্যালারি ও Downloads ফোল্ডারে সেভ হয়েছে!",
+                        Toast.LENGTH_LONG
+                    ).show()
+                    try {
+                        val chooser = Intent.createChooser(shareIntent, "নোটিশ ফটো শেয়ার বা ওপেন করুন").apply {
+                            if (context !is android.app.Activity) {
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                        }
+                        context.startActivity(chooser)
+                    } catch (_: Exception) {
+                        try {
+                            val chooser = Intent.createChooser(shareIntent, "নোটিশ ফটো শেয়ার বা ওপেন করুন")
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            appContext.startActivity(chooser)
+                        } catch (_: Exception) {
+                        }
+                    }
+                }
+            } catch (e: Throwable) {
+                mainHandler.post {
+                    Toast.makeText(appContext, "ফটো ডাউনলোড করতে ত্রুটি: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            } finally {
+                try {
+                    bitmap?.recycle()
+                } catch (_: Exception) {
                 }
             }
-
-            val cacheFile = File(context.cacheDir, fileName)
-            FileOutputStream(cacheFile).use { out ->
-                bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
-            }
-
-            PdfPrintUtil.saveFileToDownloads(context, cacheFile, fileName, "image/png")
-
-            val shareUri = FileProvider.getUriForFile(
-                context,
-                "${context.packageName}.fileprovider",
-                cacheFile
-            )
-
-            Toast.makeText(
-                context,
-                "হাই-রেজুলেশন নোটিশ ফটো গ্যালারি ও Downloads ফোল্ডারে সেভ হয়েছে!",
-                Toast.LENGTH_LONG
-            ).show()
-
-            val madrasaInfo = MadrasaInfoStore.getInfo(context)
-            val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                type = "image/png"
-                putExtra(Intent.EXTRA_STREAM, shareUri)
-                putExtra(Intent.EXTRA_SUBJECT, "মাদ্রাসা নোটিশ - ${notice.title}")
-                putExtra(
-                    Intent.EXTRA_TEXT,
-                    "${madrasaInfo.name}\nনোটিশ: ${notice.title}\nতারিখ: ${notice.date}\n\n${notice.description}"
-                )
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }
-            context.startActivity(Intent.createChooser(shareIntent, "নোটিশ ফটো শেয়ার বা ওপেন করুন"))
-
-        } catch (e: Exception) {
-            Toast.makeText(context, "ফটো ডাউনলোড করতে ত্রুটি: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
 }

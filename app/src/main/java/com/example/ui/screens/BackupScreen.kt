@@ -79,7 +79,16 @@ import java.io.FileOutputStream
 import java.security.MessageDigest
 import java.text.SimpleDateFormat
 import java.util.*
+import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
+
+private val driveHttpClient: OkHttpClient by lazy {
+    OkHttpClient.Builder()
+        .connectTimeout(20, TimeUnit.SECONDS)
+        .readTimeout(25, TimeUnit.SECONDS)
+        .writeTimeout(25, TimeUnit.SECONDS)
+        .build()
+}
 
 private data class DriveBackupEntry(
     val id: String,
@@ -135,51 +144,52 @@ private val DRIVE_SCOPES = listOf(Scope(DRIVE_APPDATA_SCOPE))
 private suspend fun verifyGoogleDriveToken(token: String): VerifiedDriveSession {
     return withContext(Dispatchers.IO) {
         try {
-            val client = OkHttpClient()
             val aboutReq = Request.Builder()
                 .url("https://www.googleapis.com/drive/v3/about?fields=user(emailAddress,displayName)")
                 .addHeader("Authorization", "Bearer $token")
                 .get()
                 .build()
-            val aboutRes = client.newCall(aboutReq).execute()
-            val aboutBody = aboutRes.body?.string().orEmpty()
+            driveHttpClient.newCall(aboutReq).execute().use { aboutRes ->
+                val aboutBody = aboutRes.body?.string().orEmpty()
 
-            if (aboutRes.isSuccessful) {
-                val json = JSONObject(aboutBody)
-                val userObj = json.optJSONObject("user")
-                var email = userObj?.optString("emailAddress", "").orEmpty()
-                val displayName = userObj?.optString("displayName", "").orEmpty()
+                if (aboutRes.isSuccessful) {
+                    val json = JSONObject(aboutBody)
+                    val userObj = json.optJSONObject("user")
+                    var email = userObj?.optString("emailAddress", "").orEmpty()
+                    val displayName = userObj?.optString("displayName", "").orEmpty()
 
-                if (email.isBlank()) {
-                    try {
-                        val infoReq = Request.Builder()
-                            .url("https://oauth2.googleapis.com/tokeninfo?access_token=$token")
-                            .get()
-                            .build()
-                        val infoRes = client.newCall(infoReq).execute()
-                        if (infoRes.isSuccessful) {
-                            val infoJson = JSONObject(infoRes.body?.string().orEmpty())
-                            email = infoJson.optString("email", "")
+                    if (email.isBlank()) {
+                        try {
+                            val infoReq = Request.Builder()
+                                .url("https://oauth2.googleapis.com/tokeninfo?access_token=$token")
+                                .get()
+                                .build()
+                            driveHttpClient.newCall(infoReq).execute().use { infoRes ->
+                                if (infoRes.isSuccessful) {
+                                    val infoJson = JSONObject(infoRes.body?.string().orEmpty())
+                                    email = infoJson.optString("email", "")
+                                }
+                            }
+                        } catch (_: Exception) {
                         }
-                    } catch (_: Exception) {
                     }
-                }
 
-                VerifiedDriveSession(
-                    isValid = true,
-                    email = email.ifBlank { displayName.ifBlank { "Google Account" } },
-                    accessToken = token
-                )
-            } else {
-                val errMsg = try {
-                    JSONObject(aboutBody).optJSONObject("error")?.optString("message") ?: "HTTP ${aboutRes.code}"
-                } catch (_: Exception) {
-                    "HTTP ${aboutRes.code}"
+                    VerifiedDriveSession(
+                        isValid = true,
+                        email = email.ifBlank { displayName.ifBlank { "Google Account" } },
+                        accessToken = token
+                    )
+                } else {
+                    val errMsg = try {
+                        JSONObject(aboutBody).optJSONObject("error")?.optString("message") ?: "HTTP ${aboutRes.code}"
+                    } catch (_: Exception) {
+                        "HTTP ${aboutRes.code}"
+                    }
+                    VerifiedDriveSession(
+                        isValid = false,
+                        errorMessage = "Drive API verification failed: $errMsg"
+                    )
                 }
-                VerifiedDriveSession(
-                    isValid = false,
-                    errorMessage = "Drive API verification failed: $errMsg"
-                )
             }
         } catch (e: Exception) {
             VerifiedDriveSession(
@@ -298,8 +308,9 @@ fun BackupScreen(
         try {
             val res = authorizeDriveResult(context, DRIVE_SCOPES)
             val authResult = res.getOrNull()
-            if (authResult != null && !authResult.hasResolution() && !authResult.accessToken.isNullOrBlank()) {
-                handleVerifiedToken(authResult.accessToken!!, showSuccessToast = showStatusToast)
+            val token = authResult?.accessToken
+            if (authResult != null && !authResult.hasResolution() && !token.isNullOrBlank()) {
+                handleVerifiedToken(token, showSuccessToast = showStatusToast)
                 if (showStatusToast && isGoogleConnected) {
                     Toast.makeText(context, "Connection Verified ($connectedEmail)", Toast.LENGTH_SHORT).show()
                 }
@@ -586,12 +597,14 @@ fun BackupScreen(
             try {
                 val result = authorizeDriveResult(context, DRIVE_SCOPES)
                 result.onSuccess { authResult ->
-                    if (authResult.hasResolution() && authResult.pendingIntent != null) {
+                    val pendingIntent = authResult.pendingIntent
+                    val accessToken = authResult.accessToken
+                    if (authResult.hasResolution() && pendingIntent != null) {
                         authResolutionLauncher.launch(
-                            IntentSenderRequest.Builder(authResult.pendingIntent!!.intentSender).build()
+                            IntentSenderRequest.Builder(pendingIntent.intentSender).build()
                         )
-                    } else if (!authResult.accessToken.isNullOrBlank()) {
-                        handleVerifiedToken(authResult.accessToken!!, showSuccessToast = true)
+                    } else if (!accessToken.isNullOrBlank()) {
+                        handleVerifiedToken(accessToken, showSuccessToast = true)
                         isConnecting = false
                     } else {
                         launchGoogleSignInFallback()
@@ -610,12 +623,11 @@ fun BackupScreen(
         scope.launch(Dispatchers.IO) {
             try {
                 if (!tokenToRevoke.isNullOrBlank()) {
-                    val client = OkHttpClient()
                     val req = Request.Builder()
                         .url("https://oauth2.googleapis.com/revoke?token=$tokenToRevoke")
                         .post("".toRequestBody("application/x-www-form-urlencoded".toMediaType()))
                         .build()
-                    client.newCall(req).execute().close()
+                    driveHttpClient.newCall(req).execute().close()
                     try {
                         GoogleAuthUtil.clearToken(context, tokenToRevoke)
                     } catch (_: Exception) {
@@ -791,7 +803,6 @@ fun BackupScreen(
                 val token = getFreshAccessToken()
                     ?: return@withContext Result.failure(Exception("Valid Google Drive token not available"))
 
-                val client = OkHttpClient()
                 val dateSuffix = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
                 val fileName = "MadrasaMPro_Backup_$dateSuffix.json"
 
@@ -819,17 +830,18 @@ fun BackupScreen(
                     .post(requestBody)
                     .build()
 
-                val uploadRes = client.newCall(uploadReq).execute()
-                val uploadBody = uploadRes.body?.string().orEmpty()
-                if (uploadRes.isSuccessful) {
-                    Result.success("Google Drive (Madrasa M PRO)")
-                } else {
-                    val apiMsg = try {
-                        JSONObject(uploadBody).optJSONObject("error")?.optString("message") ?: "HTTP ${uploadRes.code}"
-                    } catch (_: Exception) {
-                        "HTTP ${uploadRes.code}"
+                driveHttpClient.newCall(uploadReq).execute().use { uploadRes ->
+                    val uploadBody = uploadRes.body?.string().orEmpty()
+                    if (uploadRes.isSuccessful) {
+                        Result.success("Google Drive (Madrasa M PRO)")
+                    } else {
+                        val apiMsg = try {
+                            JSONObject(uploadBody).optJSONObject("error")?.optString("message") ?: "HTTP ${uploadRes.code}"
+                        } catch (_: Exception) {
+                            "HTTP ${uploadRes.code}"
+                        }
+                        Result.failure(Exception(apiMsg))
                     }
-                    Result.failure(Exception(apiMsg))
                 }
             } catch (e: Exception) {
                 Result.failure(e)
@@ -842,7 +854,6 @@ fun BackupScreen(
             try {
                 val token = getFreshAccessToken()
                     ?: return@withContext Result.failure(Exception("Token expired"))
-                val client = OkHttpClient()
                 val collected = mutableListOf<DriveBackupEntry>()
 
                 val req = Request.Builder()
@@ -850,28 +861,29 @@ fun BackupScreen(
                     .addHeader("Authorization", "Bearer $token")
                     .get()
                     .build()
-                val res = client.newCall(req).execute()
-                val body = res.body?.string().orEmpty()
-                if (!res.isSuccessful) {
-                    val errMsg = try {
-                        JSONObject(body).optJSONObject("error")?.optString("message") ?: "HTTP ${res.code}"
-                    } catch (_: Exception) {
-                        "HTTP ${res.code}"
+                driveHttpClient.newCall(req).execute().use { res ->
+                    val body = res.body?.string().orEmpty()
+                    if (!res.isSuccessful) {
+                        val errMsg = try {
+                            JSONObject(body).optJSONObject("error")?.optString("message") ?: "HTTP ${res.code}"
+                        } catch (_: Exception) {
+                            "HTTP ${res.code}"
+                        }
+                        return@withContext Result.failure(Exception(errMsg))
                     }
-                    return@withContext Result.failure(Exception(errMsg))
-                }
-                val arr = JSONObject(body).optJSONArray("files")
-                if (arr != null) {
-                    for (i in 0 until arr.length()) {
-                        val f = arr.getJSONObject(i)
-                        collected.add(
-                            DriveBackupEntry(
-                                id = f.optString("id"),
-                                name = f.optString("name", "Backup.json"),
-                                modifiedTime = f.optString("modifiedTime", ""),
-                                sizeBytes = f.optString("size", "0").toLongOrNull() ?: 0L
+                    val arr = JSONObject(body).optJSONArray("files")
+                    if (arr != null) {
+                        for (i in 0 until arr.length()) {
+                            val f = arr.getJSONObject(i)
+                            collected.add(
+                                DriveBackupEntry(
+                                    id = f.optString("id"),
+                                    name = f.optString("name", "Backup.json"),
+                                    modifiedTime = f.optString("modifiedTime", ""),
+                                    sizeBytes = f.optString("size", "0").toLongOrNull() ?: 0L
+                                )
                             )
-                        )
+                        }
                     }
                 }
                 Result.success(collected)
@@ -886,18 +898,18 @@ fun BackupScreen(
             try {
                 val token = getFreshAccessToken()
                     ?: return@withContext Result.failure(Exception("Token expired"))
-                val client = OkHttpClient()
                 val req = Request.Builder()
                     .url("https://www.googleapis.com/drive/v3/files/$fileId?alt=media")
                     .addHeader("Authorization", "Bearer $token")
                     .get()
                     .build()
-                val res = client.newCall(req).execute()
-                val body = res.body?.string().orEmpty()
-                if (!res.isSuccessful) {
-                    return@withContext Result.failure(Exception("Download failed: HTTP ${res.code}"))
+                driveHttpClient.newCall(req).execute().use { res ->
+                    val body = res.body?.string().orEmpty()
+                    if (!res.isSuccessful) {
+                        return@withContext Result.failure(Exception("Download failed: HTTP ${res.code}"))
+                    }
+                    viewModel.restoreFromBackupJson(body)
                 }
-                viewModel.restoreFromBackupJson(body)
             } catch (e: Exception) {
                 Result.failure(e)
             }
@@ -920,7 +932,7 @@ fun BackupScreen(
         if (lastEpoch > 0L && (now - lastEpoch) >= intervalMs) {
             isUploading = true
             try {
-                val jsonString = createBackupJson()
+                val jsonString = withContext(Dispatchers.Default) { createBackupJson() }
                 val res = uploadToGoogleDrive(jsonString)
                 res.onSuccess {
                     val timeNow = SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.getDefault()).format(Date())
@@ -971,17 +983,21 @@ fun BackupScreen(
         contract = ActivityResultContracts.CreateDocument("application/json")
     ) { targetUri ->
         if (targetUri != null) {
-            try {
-                val jsonString = createBackupJson()
-                context.contentResolver.openOutputStream(targetUri)?.use { output ->
-                    output.write(jsonString.toByteArray(Charsets.UTF_8))
+            scope.launch {
+                try {
+                    withContext(Dispatchers.IO) {
+                        val jsonString = createBackupJson()
+                        context.contentResolver.openOutputStream(targetUri)?.use { output ->
+                            output.write(jsonString.toByteArray(Charsets.UTF_8))
+                        }
+                    }
+                    val timeNow = SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.getDefault()).format(Date())
+                    lastBackupTime = timeNow
+                    prefs.edit().putString("last_backup_time", timeNow).apply()
+                    Toast.makeText(context, "Local Backup Successful!", Toast.LENGTH_LONG).show()
+                } catch (e: Exception) {
+                    Toast.makeText(context, "সংরক্ষণে ত্রুটি: ${e.message}", Toast.LENGTH_SHORT).show()
                 }
-                val timeNow = SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.getDefault()).format(Date())
-                lastBackupTime = timeNow
-                prefs.edit().putString("last_backup_time", timeNow).apply()
-                Toast.makeText(context, "Local Backup Successful!", Toast.LENGTH_LONG).show()
-            } catch (e: Exception) {
-                Toast.makeText(context, "সংরক্ষণে ত্রুটি: ${e.message}", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -1077,7 +1093,8 @@ fun BackupScreen(
                     }
                 }
 
-                if (!connectionError.isNullOrBlank()) {
+                val currentConnErr = connectionError
+                if (!currentConnErr.isNullOrBlank()) {
                     Spacer(modifier = Modifier.height(10.dp))
                     Surface(
                         color = MadrasaRed.copy(alpha = 0.12f),
@@ -1087,7 +1104,7 @@ fun BackupScreen(
                     ) {
                         Column(modifier = Modifier.padding(10.dp)) {
                             Text(
-                                text = connectionError!!,
+                                text = currentConnErr,
                                 color = MadrasaRed,
                                 fontSize = 12.sp
                             )
@@ -1222,7 +1239,7 @@ fun BackupScreen(
                                 connectionError = null
                                 scope.launch {
                                     try {
-                                        val jsonString = createBackupJson()
+                                        val jsonString = withContext(Dispatchers.Default) { createBackupJson() }
                                         val uploadResult = uploadToGoogleDrive(jsonString)
                                         uploadResult.onSuccess { folderLabel ->
                                             val timeNow = SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.getDefault()).format(Date())
@@ -1380,26 +1397,30 @@ fun BackupScreen(
 
                     Button(
                         onClick = {
-                            try {
-                                val jsonString = createBackupJson()
-                                val backupFile = File(context.cacheDir, "MadrasaMPro_Share_Backup.json")
-                                FileOutputStream(backupFile).use { out ->
-                                    out.write(jsonString.toByteArray(Charsets.UTF_8))
+                            scope.launch {
+                                try {
+                                    val shareUri = withContext(Dispatchers.IO) {
+                                        val jsonString = createBackupJson()
+                                        val backupFile = File(context.cacheDir, "MadrasaMPro_Share_Backup.json")
+                                        FileOutputStream(backupFile).use { out ->
+                                            out.write(jsonString.toByteArray(Charsets.UTF_8))
+                                        }
+                                        FileProvider.getUriForFile(
+                                            context,
+                                            "${context.packageName}.fileprovider",
+                                            backupFile
+                                        )
+                                    }
+                                    val intent = Intent(Intent.ACTION_SEND).apply {
+                                        type = "application/json"
+                                        putExtra(Intent.EXTRA_STREAM, shareUri)
+                                        putExtra(Intent.EXTRA_SUBJECT, "Madrasa M PRO Backup")
+                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    }
+                                    context.startActivity(Intent.createChooser(intent, "শেয়ার করুন"))
+                                } catch (e: Exception) {
+                                    Toast.makeText(context, "শেয়ার করতে ত্রুটি: ${e.message}", Toast.LENGTH_SHORT).show()
                                 }
-                                val shareUri = FileProvider.getUriForFile(
-                                    context,
-                                    "${context.packageName}.fileprovider",
-                                    backupFile
-                                )
-                                val intent = Intent(Intent.ACTION_SEND).apply {
-                                    type = "application/json"
-                                    putExtra(Intent.EXTRA_STREAM, shareUri)
-                                    putExtra(Intent.EXTRA_SUBJECT, "Madrasa M PRO Backup")
-                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                }
-                                context.startActivity(Intent.createChooser(intent, "শেয়ার করুন"))
-                            } catch (e: Exception) {
-                                Toast.makeText(context, "শেয়ার করতে ত্রুটি: ${e.message}", Toast.LENGTH_SHORT).show()
                             }
                         },
                         modifier = Modifier

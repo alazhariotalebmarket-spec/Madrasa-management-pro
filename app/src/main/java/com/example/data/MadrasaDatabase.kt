@@ -22,7 +22,7 @@ import com.example.data.entity.*
         QuestionPaperEntity::class,
         ClassRoutineEntity::class
     ],
-    version = 5,
+    version = 6,
     exportSchema = false
 )
 abstract class MadrasaDatabase : RoomDatabase() {
@@ -114,6 +114,14 @@ abstract class MadrasaDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                try {
+                    db.execSQL("ALTER TABLE class_routines ADD COLUMN duration TEXT NOT NULL DEFAULT ''")
+                } catch (_: Exception) {}
+            }
+        }
+
         fun getDatabase(context: Context): MadrasaDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -121,7 +129,8 @@ abstract class MadrasaDatabase : RoomDatabase() {
                     MadrasaDatabase::class.java,
                     "madrasa_database"
                 )
-                    .addMigrations(MIGRATION_3_4, MIGRATION_4_5)
+                    .setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)
+                    .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                     .fallbackToDestructiveMigration()
                     .build()
                 INSTANCE = instance

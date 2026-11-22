@@ -10,9 +10,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Visibility
@@ -31,13 +29,15 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.data.entity.NoticeEntity
 import com.example.ui.components.MadrasaEmptyState
+import com.example.ui.components.ThreeDotDeleteMenu
 import com.example.ui.components.madrasaCardBorder
 import com.example.ui.theme.MadrasaAccent
 import com.example.ui.theme.MadrasaGold
 import com.example.ui.theme.MadrasaPrimary
 import com.example.ui.theme.MadrasaPrimaryDark
-import com.example.ui.theme.MadrasaRed
 import com.example.util.NoticeImageUtil
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @Composable
 fun NoticeScreen(
@@ -150,7 +150,7 @@ fun NoticeScreen(
                 )
             }
         } else {
-            items(notices) { notice ->
+            items(notices, key = { it.id }) { notice ->
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(14.dp),
@@ -175,9 +175,9 @@ fun NoticeScreen(
                                 color = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.weight(1f)
                             )
-                            IconButton(onClick = { onDeleteNotice(notice.id) }) {
-                                Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MadrasaRed)
-                            }
+                            ThreeDotDeleteMenu(
+                                onDelete = { onDeleteNotice(notice.id) }
+                            )
                         }
 
                         Text(
@@ -239,10 +239,14 @@ fun NoticeScreen(
     }
 
     // High-Resolution Photo Preview Dialog
-    if (previewNotice != null) {
-        val n = previewNotice!!
-        val posterBitmap = remember(n) {
-            NoticeImageUtil.createNoticePosterBitmap(context, n)
+    previewNotice?.let { n ->
+        var posterBitmap by remember(n.id, n.title, n.description, n.date) {
+            mutableStateOf<Bitmap?>(null)
+        }
+        LaunchedEffect(n.id, n.title, n.description, n.date) {
+            posterBitmap = withContext(Dispatchers.Default) {
+                NoticeImageUtil.createNoticePosterBitmap(context, n)
+            }
         }
 
         Dialog(
@@ -291,11 +295,16 @@ fun NoticeScreen(
                             .verticalScroll(rememberScrollState()),
                         contentAlignment = Alignment.Center
                     ) {
-                        Image(
-                            bitmap = posterBitmap.asImageBitmap(),
-                            contentDescription = "Notice Poster",
-                            modifier = Modifier.fillMaxWidth()
-                        )
+                        val bmp = posterBitmap
+                        if (bmp != null) {
+                            Image(
+                                bitmap = bmp.asImageBitmap(),
+                                contentDescription = "Notice Poster",
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        } else {
+                            CircularProgressIndicator(color = MadrasaGold, modifier = Modifier.padding(32.dp))
+                        }
                     }
 
                     Spacer(modifier = Modifier.height(10.dp))

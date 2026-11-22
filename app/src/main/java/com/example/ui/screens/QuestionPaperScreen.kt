@@ -5,7 +5,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material3.*
@@ -20,9 +19,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.entity.QuestionPaperEntity
 import com.example.ui.components.MadrasaEmptyState
+import com.example.ui.components.ThreeDotDeleteMenu
 import com.example.ui.components.madrasaCardBorder
 import com.example.ui.theme.MadrasaPrimary
-import com.example.ui.theme.MadrasaRed
 import com.example.ui.theme.MadrasaSapphire
 import com.example.util.PdfPrintUtil
 
@@ -208,9 +207,9 @@ fun QuestionPaperScreen(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
-                            IconButton(onClick = { onDeletePaper(paper.id) }) {
-                                Icon(Icons.Default.Delete, contentDescription = "মুছুন", tint = MadrasaRed)
-                            }
+                            ThreeDotDeleteMenu(
+                                onDelete = { onDeletePaper(paper.id) }
+                            )
                         }
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(

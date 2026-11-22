@@ -8,6 +8,8 @@ import android.graphics.pdf.PdfDocument
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.os.Handler
+import android.os.Looper
 import android.provider.MediaStore
 import android.text.Layout
 import android.text.StaticLayout
@@ -21,6 +23,7 @@ import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.InputStream
+import java.util.concurrent.Executors
 
 data class MeritPdfEntry(
     val rankLabel: String,
@@ -65,6 +68,59 @@ object PdfPrintUtil {
     private const val CR80_PDF_H_PT = 254
 
     private val highQualityBitmapPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG or Paint.DITHER_FLAG)
+    private val pdfExecutor = Executors.newSingleThreadExecutor()
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    private fun showToast(context: Context, message: String, duration: Int = Toast.LENGTH_SHORT) {
+        val appContext = context.applicationContext
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            Toast.makeText(appContext, message, duration).show()
+        } else {
+            mainHandler.post { Toast.makeText(appContext, message, duration).show() }
+        }
+    }
+
+    private fun safeStartChooser(context: Context, intent: Intent, chooserTitle: String) {
+        mainHandler.post {
+            try {
+                val chooser = Intent.createChooser(intent, chooserTitle).apply {
+                    if (context !is android.app.Activity) {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                }
+                context.startActivity(chooser)
+            } catch (_: Exception) {
+                try {
+                    val chooser = Intent.createChooser(intent, chooserTitle)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    context.applicationContext.startActivity(chooser)
+                } catch (e: Exception) {
+                    Toast.makeText(
+                        context.applicationContext,
+                        "ফাইল শেয়ার করতে ত্রুটি: ${e.localizedMessage ?: "অ্যাপ পাওয়া যায়নি"}",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            }
+        }
+    }
+
+    private fun runAsyncExport(
+        context: Context,
+        startToast: String = "পিডিএফ তৈরি হচ্ছে...",
+        errorPrefix: String = "পিডিএফ তৈরিতে ত্রুটি",
+        block: (Context) -> Unit
+    ) {
+        val appContext = context.applicationContext
+        showToast(appContext, startToast, Toast.LENGTH_SHORT)
+        pdfExecutor.execute {
+            try {
+                block(appContext)
+            } catch (e: Throwable) {
+                showToast(appContext, "$errorPrefix: ${e.message ?: "অজানা ত্রুটি"}", Toast.LENGTH_LONG)
+            }
+        }
+    }
 
     private fun loadHighResMadrasaLogo(context: Context, maxPx: Int = 512): Bitmap? {
         return try {
@@ -72,11 +128,13 @@ object PdfPrintUtil {
             val src = BitmapFactory.decodeResource(context.resources, R.drawable.madrasa_logo_round, opts)
                 ?: return null
             if (src.width > maxPx || src.height > maxPx) {
-                Bitmap.createScaledBitmap(src, maxPx, maxPx, true)
+                val scaled = Bitmap.createScaledBitmap(src, maxPx, maxPx, true)
+                if (scaled != src) src.recycle()
+                scaled
             } else {
                 src
             }
-        } catch (_: Exception) {
+        } catch (_: Throwable) {
             null
         }
     }
@@ -85,25 +143,51 @@ object PdfPrintUtil {
         return try {
             val opts = BitmapFactory.Options().apply { inScaled = false }
             val src = BitmapFactory.decodeResource(context.resources, R.drawable.madrasa_logo_round, opts)
-            src?.let { Bitmap.createScaledBitmap(it, sizePx, sizePx, true) }
-        } catch (_: Exception) {
+                ?: return null
+            val scaled = Bitmap.createScaledBitmap(src, sizePx, sizePx, true)
+            if (scaled != src) src.recycle()
+            scaled
+        } catch (_: Throwable) {
             null
+        }
+    }
+
+    private fun openPhotoInputStream(context: Context, photoUriStr: String): InputStream? {
+        val uri = Uri.parse(photoUriStr)
+        return if (uri.scheme == "file" || uri.scheme.isNullOrBlank()) {
+            val path = uri.path ?: photoUriStr
+            val file = File(path)
+            if (file.exists()) FileInputStream(file) else null
+        } else {
+            context.contentResolver.openInputStream(uri)
         }
     }
 
     private fun loadPhotoBitmap(context: Context, photoUriStr: String, sizePx: Int): Bitmap? {
         if (photoUriStr.isBlank()) return null
         return try {
-            val uri = Uri.parse(photoUriStr)
-            val stream: InputStream? = if (uri.scheme == "file" || uri.scheme.isNullOrBlank()) {
-                FileInputStream(File(uri.path ?: photoUriStr))
-            } else {
-                context.contentResolver.openInputStream(uri)
+            val boundsOpts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            openPhotoInputStream(context, photoUriStr)?.use { stream ->
+                BitmapFactory.decodeStream(stream, null, boundsOpts)
+            } ?: return null
+
+            val targetDim = (sizePx * 2).coerceAtLeast(64)
+            var sampleSize = 1
+            while (boundsOpts.outWidth / sampleSize > targetDim &&
+                boundsOpts.outHeight / sampleSize > targetDim
+            ) {
+                sampleSize *= 2
             }
-            val src = BitmapFactory.decodeStream(stream)
-            stream?.close()
-            src?.let { Bitmap.createScaledBitmap(it, sizePx, sizePx, true) }
-        } catch (_: Exception) {
+
+            val decodeOpts = BitmapFactory.Options().apply { inSampleSize = sampleSize }
+            val src = openPhotoInputStream(context, photoUriStr)?.use { stream ->
+                BitmapFactory.decodeStream(stream, null, decodeOpts)
+            } ?: return null
+
+            val scaled = Bitmap.createScaledBitmap(src, sizePx, sizePx, true)
+            if (scaled != src) src.recycle()
+            scaled
+        } catch (_: Throwable) {
             null
         }
     }
@@ -342,6 +426,9 @@ object PdfPrintUtil {
         fun finishDocument() {
             drawFooterOnCurrentPage()
             doc.finishPage(page)
+            try {
+                logoBmp?.recycle()
+            } catch (_: Exception) {}
         }
     }
 
@@ -351,24 +438,49 @@ object PdfPrintUtil {
         val alignment: Layout.Alignment = Layout.Alignment.ALIGN_NORMAL
     )
 
-    private fun drawTableHeader(cursor: A4PageCursor, cols: List<TableCol>, bgColor: Int = 0xFF0A5C36.toInt()) {
+    private fun drawTableHeader(
+        cursor: A4PageCursor,
+        cols: List<TableCol>,
+        bgColor: Int = 0xFF0A5C36.toInt(),
+        showCellBorders: Boolean = false
+    ) {
         val thPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.WHITE
             textSize = 10f
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
         }
         val layouts = cols.map { col ->
-            makeStaticLayout(col.title, thPaint, (col.width - 8f).toInt(), col.alignment, 1.05f, 0f)
+            makeStaticLayout(col.title, thPaint, (col.width - 10f).toInt().coerceAtLeast(16), col.alignment, 1.05f, 0f)
         }
-        val rowH = maxOf(26f, (layouts.maxOfOrNull { it.height } ?: 14) + 12f)
+        val rowH = maxOf(28f, (layouts.maxOfOrNull { it.height } ?: 14) + 12f)
         cursor.ensureSpace(rowH)
 
-        cursor.canvas.drawRect(LEFT, cursor.y, RIGHT, cursor.y + rowH, Paint().apply { color = bgColor })
+        val top = cursor.y
+        cursor.canvas.drawRect(LEFT, top, RIGHT, top + rowH, Paint().apply { color = bgColor })
+        if (showCellBorders) {
+            val outerBorder = Paint().apply {
+                color = 0xFF063D23.toInt()
+                style = Paint.Style.STROKE
+                strokeWidth = 0.9f
+            }
+            cursor.canvas.drawRect(LEFT, top, RIGHT, top + rowH, outerBorder)
+        }
+
+        val dividerPaint = Paint().apply {
+            color = 0x80FFFFFF.toInt()
+            strokeWidth = 0.8f
+        }
         var x = LEFT
         cols.forEachIndexed { idx, col ->
+            if (showCellBorders && idx > 0) {
+                cursor.canvas.drawLine(x, top, x, top + rowH, dividerPaint)
+            }
             val l = layouts[idx]
-            val drawY = cursor.y + (rowH - l.height) / 2f
-            cursor.canvas.drawLayoutAt(l, x + 4f, drawY)
+            val drawY = top + (rowH - l.height) / 2f
+            cursor.canvas.save()
+            cursor.canvas.clipRect(x + 1f, top + 0.5f, x + col.width - 1f, top + rowH - 0.5f)
+            cursor.canvas.drawLayoutAt(l, x + 5f, drawY)
+            cursor.canvas.restore()
             x += col.width
         }
         cursor.y += rowH
@@ -381,42 +493,49 @@ object PdfPrintUtil {
         textColors: List<Int?> = emptyList(),
         boldCols: Set<Int> = emptySet(),
         isEvenRow: Boolean,
-        repeatHeader: Boolean = true
+        repeatHeader: Boolean = true,
+        showHeaderCellBorders: Boolean = false,
+        rowBgOverride: Int? = null,
+        borderColorOverride: Int? = null
     ) {
         val layouts = cols.mapIndexed { idx, col ->
             val tp = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = textColors.getOrNull(idx) ?: 0xFF1F2937.toInt()
-                textSize = 10f
+                textSize = 9.8f
                 if (boldCols.contains(idx)) typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             }
-            makeStaticLayout(values.getOrElse(idx) { "" }, tp, (col.width - 8f).toInt(), col.alignment, 1.1f, 1f)
+            makeStaticLayout(values.getOrElse(idx) { "" }, tp, (col.width - 10f).toInt().coerceAtLeast(16), col.alignment, 1.12f, 1f)
         }
 
-        val rowH = maxOf(22f, (layouts.maxOfOrNull { it.height } ?: 14) + 10f)
+        val rowH = maxOf(24f, (layouts.maxOfOrNull { it.height } ?: 14) + 12f)
         cursor.ensureSpace(rowH) {
             if (repeatHeader) {
-                drawTableHeader(cursor, cols)
+                drawTableHeader(cursor, cols, showCellBorders = showHeaderCellBorders)
             }
         }
 
-        val bg = if (isEvenRow) 0xFFF8FBF9.toInt() else Color.WHITE
-        cursor.canvas.drawRect(LEFT, cursor.y, RIGHT, cursor.y + rowH, Paint().apply { color = bg })
+        val top = cursor.y
+        val bg = rowBgOverride ?: if (isEvenRow) 0xFFF8FBF9.toInt() else Color.WHITE
+        cursor.canvas.drawRect(LEFT, top, RIGHT, top + rowH, Paint().apply { color = bg })
 
         val borderPaint = Paint().apply {
-            color = 0xFFDDE5DF.toInt()
+            color = borderColorOverride ?: if (showHeaderCellBorders) 0xFF9FB5A8.toInt() else 0xFFDDE5DF.toInt()
             style = Paint.Style.STROKE
-            strokeWidth = 0.7f
+            strokeWidth = if (borderColorOverride != null || showHeaderCellBorders) 0.85f else 0.7f
         }
-        cursor.canvas.drawRect(LEFT, cursor.y, RIGHT, cursor.y + rowH, borderPaint)
+        cursor.canvas.drawRect(LEFT, top, RIGHT, top + rowH, borderPaint)
 
         var x = LEFT
         cols.forEachIndexed { idx, col ->
             if (idx > 0) {
-                cursor.canvas.drawLine(x, cursor.y, x, cursor.y + rowH, borderPaint)
+                cursor.canvas.drawLine(x, top, x, top + rowH, borderPaint)
             }
             val l = layouts[idx]
-            val drawY = cursor.y + (rowH - l.height) / 2f
-            cursor.canvas.drawLayoutAt(l, x + 4f, drawY)
+            val drawY = top + (rowH - l.height) / 2f
+            cursor.canvas.save()
+            cursor.canvas.clipRect(x + 1f, top + 0.5f, x + col.width - 1f, top + rowH - 0.5f)
+            cursor.canvas.drawLayoutAt(l, x + 5f, drawY)
+            cursor.canvas.restore()
             x += col.width
         }
         cursor.y += rowH
@@ -431,13 +550,13 @@ object PdfPrintUtil {
         result: ResultEntity,
         meritRank: String = "১ম",
         gradeCalculator: (Double) -> String
-    ) {
+    ) = runAsyncExport(context, "রেজাল্ট পিডিএফ তৈরি হচ্ছে...", "পিডিএফ তৈরিতে ত্রুটি") { appContext ->
+        val doc = PdfDocument()
         try {
-            val doc = PdfDocument()
-            val cursor = A4PageCursor(context, doc, "${result.exam} - মার্কশিট ও রেজাল্ট কার্ড (মেধাস্থান: $meritRank)")
+            val cursor = A4PageCursor(appContext, doc, "${result.exam} - মার্কশিট ও রেজাল্ট কার্ড (মেধাস্থান: $meritRank)")
 
             // Student Info Card (wrapped)
-            drawStudentInfoCard(cursor, context, student, "মেধাস্থান: $meritRank  •  তারিখ: ${result.date}")
+            drawStudentInfoCard(cursor, appContext, student, "মেধাস্থান: $meritRank  •  তারিখ: ${result.date}")
 
             val cols = listOf(
                 TableCol("বিষয়", 247f, Layout.Alignment.ALIGN_NORMAL),
@@ -481,13 +600,12 @@ object PdfPrintUtil {
             cursor.finishDocument()
 
             val safeName = (student?.name ?: "student").replace("\\s+".toRegex(), "_")
-            val pdfFile = File(context.cacheDir, "Result_${safeName}_${result.exam}.pdf")
+            val pdfFile = File(appContext.cacheDir, "Result_${safeName}_${result.exam}.pdf")
             FileOutputStream(pdfFile).use { out -> doc.writeTo(out) }
-            doc.close()
 
             shareOrOpenPdf(context, pdfFile, "রেজাল্ট কার্ড - ${student?.name}")
-        } catch (e: Exception) {
-            Toast.makeText(context, "পিডিএফ তৈরিতে ত্রুটি: ${e.message}", Toast.LENGTH_LONG).show()
+        } finally {
+            try { doc.close() } catch (_: Exception) {}
         }
     }
 
@@ -499,16 +617,17 @@ object PdfPrintUtil {
         student: StudentEntity?,
         results: List<ResultEntity>,
         gradeCalculator: (Double) -> String
-    ) {
+    ) = runAsyncExport(context, "সমন্বিত রেজাল্ট পিডিএফ তৈরি হচ্ছে...", "সমন্বিত রেজাল্ট তৈরিতে ত্রুটি") { appContext ->
+        val doc = PdfDocument()
         try {
-            val doc = PdfDocument()
-            val cursor = A4PageCursor(context, doc, "সম্মিলিত ফলাফল ও বার্ষিক প্রোগ্রেস রিপোর্ট (১ম, ২য় ও বার্ষিক পরীক্ষা)")
+            val cursor = A4PageCursor(appContext, doc, "সম্মিলিত ফলাফল ও বার্ষিক প্রোগ্রেস রিপোর্ট (১ম, ২য় ও বার্ষিক পরীক্ষা)")
 
-            drawStudentInfoCard(cursor, context, student, "মোবাইল: ${student?.phone?.ifEmpty { "নেই" } ?: "নেই"}")
+            drawStudentInfoCard(cursor, appContext, student, "মোবাইল: ${student?.phone?.ifEmpty { "নেই" } ?: "নেই"}")
 
-            val exam1 = results.find { it.exam.contains("১ম") }
-            val exam2 = results.find { it.exam.contains("২য়") }
-            val exam3 = results.find { it.exam.contains("বার্ষিক") } ?: results.firstOrNull { it != exam1 && it != exam2 }
+            val combined = CombinedResultHelper.computeForStudent(student?.id ?: 0, results)
+            val exam1 = combined?.exam1 ?: results.lastOrNull { CombinedResultHelper.isFirstTerm(it.exam) }
+            val exam2 = combined?.exam2 ?: results.lastOrNull { CombinedResultHelper.isSecondTerm(it.exam) }
+            val exam3 = combined?.exam3 ?: results.lastOrNull { CombinedResultHelper.isAnnual(it.exam) }
 
             val subjectNames = linkedSetOf<String>()
             exam1?.getSubjectList()?.forEach { subjectNames.add(it.name) }
@@ -530,13 +649,10 @@ object PdfPrintUtil {
             )
             drawTableHeader(cursor, cols)
 
+            val validExamCount = listOfNotNull(exam1, exam2, exam3).size
             var grandTotal = 0.0
-            var validExamCount = 0
-            if (exam1 != null) validExamCount++
-            if (exam2 != null) validExamCount++
-            if (exam3 != null) validExamCount++
-            val divisor = maxOf(1, validExamCount)
             var allSubjectsPassed = true
+            var maxPossible = 0
 
             subjectNames.forEachIndexed { i, subName ->
                 val m1 = exam1?.getSubjectList()?.find { it.name == subName }?.mark
@@ -544,8 +660,10 @@ object PdfPrintUtil {
                 val m3 = exam3?.getSubjectList()?.find { it.name == subName }?.mark
 
                 val subSum = (m1 ?: 0.0) + (m2 ?: 0.0) + (m3 ?: 0.0)
-                val subAvg = subSum / divisor
+                val presentForSub = listOfNotNull(m1, m2, m3).size.coerceAtLeast(1)
+                val subAvg = subSum / presentForSub
                 grandTotal += subSum
+                maxPossible += presentForSub * 100
                 if (subAvg < 33.0) allSubjectsPassed = false
 
                 val grade = gradeCalculator(subAvg)
@@ -570,14 +688,14 @@ object PdfPrintUtil {
             }
 
             cursor.y += 12f
-            val maxPossible = subjectNames.size * 100 * divisor
-            val overallAvg = if (maxPossible > 0) (grandTotal / maxPossible) * 100 else 0.0
-            val isOverallPass = allSubjectsPassed && overallAvg >= 33.0
+            val effectiveMax = maxPossible.coerceAtLeast(100)
+            val overallAvg = if (validExamCount > 0) (grandTotal / effectiveMax) * 100.0 else 0.0
+            val isOverallPass = validExamCount > 0 && allSubjectsPassed && overallAvg >= 33.0
             val overallGrade = if (isOverallPass) gradeCalculator(overallAvg) else "F"
 
             drawWrappedSummaryBanner(
                 cursor = cursor,
-                title = "সর্বমোট নম্বর: ${grandTotal.toInt()} / $maxPossible  •  গড়: ${"%.1f".format(overallAvg)}%",
+                title = "সর্বমোট নম্বর: ${grandTotal.toInt()} / $effectiveMax  •  গড়: ${"%.1f".format(overallAvg)}%",
                 subtitle = "পরীক্ষা সংখ্যা: $validExamCount টি  •  ফলাফল: $overallGrade (পাশ মার্ক: ৩৩)",
                 badgeText = if (isOverallPass) "উত্তীর্ণ (PASS) • $overallGrade" else "অনুত্তীর্ণ (FAIL) • $overallGrade",
                 isSuccess = isOverallPass
@@ -587,13 +705,12 @@ object PdfPrintUtil {
             cursor.finishDocument()
 
             val safeName = (student?.name ?: "student").replace("\\s+".toRegex(), "_")
-            val pdfFile = File(context.cacheDir, "Combined_Result_${safeName}.pdf")
+            val pdfFile = File(appContext.cacheDir, "Combined_Result_${safeName}.pdf")
             FileOutputStream(pdfFile).use { out -> doc.writeTo(out) }
-            doc.close()
 
             shareOrOpenPdf(context, pdfFile, "সমন্বিত রেজাল্ট - ${student?.name}")
-        } catch (e: Exception) {
-            Toast.makeText(context, "সমন্বিত রেজাল্ট তৈরিতে ত্রুটি: ${e.message}", Toast.LENGTH_LONG).show()
+        } finally {
+            try { doc.close() } catch (_: Exception) {}
         }
     }
 
@@ -606,10 +723,10 @@ object PdfPrintUtil {
         isYearly: Boolean,
         students: List<StudentEntity>,
         fees: List<FeeEntity>
-    ) {
+    ) = runAsyncExport(context, "বেতন রিপোর্ট পিডিএফ তৈরি হচ্ছে...", "রিপোর্ট তৈরিতে ত্রুটি") { appContext ->
+        val doc = PdfDocument()
         try {
-            val doc = PdfDocument()
-            val cursor = A4PageCursor(context, doc, "ছাত্র-ছাত্রীদের বেতন ও বিদ্যুৎ বিল হিসাব বিবরণী • $period")
+            val cursor = A4PageCursor(appContext, doc, "ছাত্র-ছাত্রীদের বেতন ও বিদ্যুৎ বিল হিসাব বিবরণী • $period")
 
             // Total width = 527f
             val cols = listOf(
@@ -628,6 +745,7 @@ object PdfPrintUtil {
             var sumPaid = 0.0
             var sumDue = 0.0
             val mult = if (isYearly) 12.0 else 1.0
+            val paidByStudent = fees.groupBy { it.studentId }.mapValues { (_, list) -> list.sumOf { it.amount } }
 
             if (students.isEmpty()) {
                 drawWrappedTableRow(
@@ -638,8 +756,7 @@ object PdfPrintUtil {
                 )
             } else {
                 students.forEachIndexed { index, student ->
-                    val studentFees = fees.filter { it.studentId == student.id }
-                    val paid = studentFees.sumOf { it.amount }
+                    val paid = paidByStudent[student.id] ?: 0.0
                     val expected = (student.fee + student.electricBill) * mult
                     val due = maxOf(0.0, expected - paid)
 
@@ -681,13 +798,12 @@ object PdfPrintUtil {
             cursor.drawSignatures("হিসাবরক্ষকের স্বাক্ষর", "মুহতামিমের সীল ও স্বাক্ষর")
             cursor.finishDocument()
 
-            val pdfFile = File(context.cacheDir, "Fee_Report_${period.replace("\\s+".toRegex(), "_")}.pdf")
+            val pdfFile = File(appContext.cacheDir, "Fee_Report_${period.replace("\\s+".toRegex(), "_")}.pdf")
             FileOutputStream(pdfFile).use { out -> doc.writeTo(out) }
-            doc.close()
 
             shareOrOpenPdf(context, pdfFile, "বেতন ও ফি হিসাব রিপোর্ট - $period")
-        } catch (e: Exception) {
-            Toast.makeText(context, "রিপোর্ট তৈরিতে ত্রুটি: ${e.message}", Toast.LENGTH_LONG).show()
+        } finally {
+            try { doc.close() } catch (_: Exception) {}
         }
     }
 
@@ -700,14 +816,14 @@ object PdfPrintUtil {
         payments: List<TeacherPaymentEntity>,
         period: String,
         isYearly: Boolean
-    ) {
+    ) = runAsyncExport(context, "শিক্ষক বেতন রিপোর্ট তৈরি হচ্ছে...", "শিক্ষক রিপোর্ট তৈরিতে ত্রুটি") { appContext ->
+        val doc = PdfDocument()
         try {
-            val doc = PdfDocument()
-            val cursor = A4PageCursor(context, doc, "শিক্ষক বেতন ও আর্থিক বিবরণী • $period")
+            val cursor = A4PageCursor(appContext, doc, "শিক্ষক বেতন ও আর্থিক বিবরণী • $period")
 
             drawGenericInfoCard(
                 cursor = cursor,
-                context = context,
+                context = appContext,
                 photoUri = teacher.photoUri,
                 primaryTitle = "শিক্ষকের নাম: ${teacher.name}",
                 secondaryTitle = "পদবী / বিষয়: ${teacher.subject}",
@@ -770,13 +886,12 @@ object PdfPrintUtil {
             cursor.finishDocument()
 
             val safeName = teacher.name.replace("\\s+".toRegex(), "_")
-            val pdfFile = File(context.cacheDir, "Teacher_Statement_${safeName}_${period.replace("\\s+".toRegex(), "_")}.pdf")
+            val pdfFile = File(appContext.cacheDir, "Teacher_Statement_${safeName}_${period.replace("\\s+".toRegex(), "_")}.pdf")
             FileOutputStream(pdfFile).use { out -> doc.writeTo(out) }
-            doc.close()
 
             shareOrOpenPdf(context, pdfFile, "শিক্ষক বেতন হিসাব - ${teacher.name}")
-        } catch (e: Exception) {
-            Toast.makeText(context, "শিক্ষক রিপোর্ট তৈরিতে ত্রুটি: ${e.message}", Toast.LENGTH_LONG).show()
+        } finally {
+            try { doc.close() } catch (_: Exception) {}
         }
     }
 
@@ -790,10 +905,10 @@ object PdfPrintUtil {
         isYearly: Boolean,
         list: List<ExpenseEntity>,
         totalAmount: Double
-    ) {
+    ) = runAsyncExport(context, "$reportType রিপোর্ট তৈরি হচ্ছে...", "$reportType রিপোর্ট তৈরিতে ত্রুটি") { appContext ->
+        val doc = PdfDocument()
         try {
-            val doc = PdfDocument()
-            val cursor = A4PageCursor(context, doc, "মাদ্রাসা $reportType (ব্যয়) হিসাব বিবরণী • $period")
+            val cursor = A4PageCursor(appContext, doc, "মাদ্রাসা $reportType (ব্যয়) হিসাব বিবরণী • $period")
 
             // Total width = 527f
             val cols = listOf(
@@ -842,13 +957,12 @@ object PdfPrintUtil {
             cursor.drawSignatures("কোষাধ্যক্ষের স্বাক্ষর", "মুহতামিমের সীল ও স্বাক্ষর")
             cursor.finishDocument()
 
-            val pdfFile = File(context.cacheDir, "${reportType}_Report_${period.replace("\\s+".toRegex(), "_")}.pdf")
+            val pdfFile = File(appContext.cacheDir, "${reportType}_Report_${period.replace("\\s+".toRegex(), "_")}.pdf")
             FileOutputStream(pdfFile).use { out -> doc.writeTo(out) }
-            doc.close()
 
             shareOrOpenPdf(context, pdfFile, "$reportType রিপোর্ট - $period")
-        } catch (e: Exception) {
-            Toast.makeText(context, "$reportType রিপোর্ট তৈরিতে ত্রুটি: ${e.message}", Toast.LENGTH_LONG).show()
+        } finally {
+            try { doc.close() } catch (_: Exception) {}
         }
     }
 
@@ -870,10 +984,10 @@ object PdfPrintUtil {
         totalExpense: Double,
         balance: Double,
         deficit: Double
-    ) {
+    ) = runAsyncExport(context, "আর্থিক বিবরণী পিডিএফ তৈরি হচ্ছে...", "আর্থিক রিপোর্ট তৈরিতে ত্রুটি") { appContext ->
+        val doc = PdfDocument()
         try {
-            val doc = PdfDocument()
-            val cursor = A4PageCursor(context, doc, "আর্থিক আয়-ব্যয় ও লাভ-লোকসান হিসাব বিবরণী • $period")
+            val cursor = A4PageCursor(appContext, doc, "আর্থিক আয়-ব্যয় ও লাভ-লোকসান হিসাব বিবরণী • $period")
 
             val cols = listOf(
                 TableCol("খাতের বিবরণ", 377f, Layout.Alignment.ALIGN_NORMAL),
@@ -922,13 +1036,12 @@ object PdfPrintUtil {
             cursor.drawSignatures("হিসাব নিরীক্ষকের স্বাক্ষর", "মুহতামিমের সীল ও স্বাক্ষর")
             cursor.finishDocument()
 
-            val pdfFile = File(context.cacheDir, "Financial_Statement_${period.replace("\\s+".toRegex(), "_")}.pdf")
+            val pdfFile = File(appContext.cacheDir, "Financial_Statement_${period.replace("\\s+".toRegex(), "_")}.pdf")
             FileOutputStream(pdfFile).use { out -> doc.writeTo(out) }
-            doc.close()
 
             shareOrOpenPdf(context, pdfFile, "আর্থিক হিসাব বিবরণী - $period")
-        } catch (e: Exception) {
-            Toast.makeText(context, "আর্থিক রিপোর্ট তৈরিতে ত্রুটি: ${e.message}", Toast.LENGTH_LONG).show()
+        } finally {
+            try { doc.close() } catch (_: Exception) {}
         }
     }
 
@@ -977,6 +1090,7 @@ object PdfPrintUtil {
             val logoLeft = (w - 92f) / 2f
             val logoTop = bleed + 14f
             canvas.drawBitmap(logoBmp, null, RectF(logoLeft, logoTop, logoLeft + 92f, logoTop + 92f), highQualityBitmapPaint)
+            try { logoBmp.recycle() } catch (_: Exception) {}
         }
 
         val namePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -1021,6 +1135,10 @@ object PdfPrintUtil {
         if (loadedPhoto != null) {
             val circlePhoto = createCircularBitmap(loadedPhoto)
             canvas.drawBitmap(circlePhoto, photoCenterX - photoSize / 2f, photoTop, null)
+            try {
+                loadedPhoto.recycle()
+                circlePhoto.recycle()
+            } catch (_: Exception) {}
         } else {
             canvas.drawCircle(photoCenterX, photoCenterY, photoSize / 2f, Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = if (isStudent) 0xFFEAF7EF.toInt() else 0xFFE6F4FA.toInt()
@@ -1135,112 +1253,18 @@ object PdfPrintUtil {
         canvas.drawLine(trimRight, h - mark, trimRight, h, cropPaint)
     }
 
-    fun generateAndShareIdCardPdf(context: Context, student: StudentEntity) {
-        try {
+    fun generateAndShareIdCardPdf(context: Context, student: StudentEntity) =
+        runAsyncExport(context, "আইডি কার্ড PDF তৈরি হচ্ছে...", "আইডি কার্ড তৈরিতে ত্রুটি") { appContext ->
             val doc = PdfDocument()
-            // 58mm x 89.6mm (54mm x 85.6mm CR80 Portrait + 2mm bleed on all sides)
-            val pageInfo = PdfDocument.PageInfo.Builder(CR80_PDF_W_PT, CR80_PDF_H_PT, 1).create()
-            val page = doc.startPage(pageInfo)
-            val canvas = page.canvas
+            try {
+                // 58mm x 89.6mm (54mm x 85.6mm CR80 Portrait + 2mm bleed on all sides)
+                val pageInfo = PdfDocument.PageInfo.Builder(CR80_PDF_W_PT, CR80_PDF_H_PT, 1).create()
+                val page = doc.startPage(pageInfo)
+                val canvas = page.canvas
 
-            canvas.save()
-            canvas.scale(CR80_PDF_W_PT.toFloat() / CR80_FULL_W_PX, CR80_PDF_H_PT.toFloat() / CR80_FULL_H_PX)
+                canvas.save()
+                canvas.scale(CR80_PDF_W_PT.toFloat() / CR80_FULL_W_PX, CR80_PDF_H_PT.toFloat() / CR80_FULL_H_PX)
 
-            val rollInfo = if (student.roll.isNotBlank()) " • রোল: ${student.roll}" else ""
-            val rows = buildList {
-                add("আইডি নং:" to "#IKM-${student.id}")
-                if (student.roll.isNotBlank()) add("রোল নম্বর:" to student.roll)
-                add("পিতার নাম:" to student.father.ifEmpty { "প্রযোজ্য নয়" })
-                add("মোবাইল নং:" to student.phone.ifEmpty { "নেই" })
-                add("মাসিক বেতন:" to "${student.fee.toInt()} ৳")
-                add("বিদ্যুৎ বিল:" to "${student.electricBill.toInt()} ৳")
-            }
-
-            drawCr80IdCardCanvas(
-                canvas = canvas,
-                context = context,
-                isStudent = true,
-                badgeLabel = "স্টুডেন্ট আইডি কার্ড (CR80)",
-                name = student.name,
-                subtitle = "জামাত: ${student.cls}$rollInfo",
-                rows = rows,
-                leftSig = "শ্রেণী শিক্ষকের স্বাক্ষর",
-                rightSig = "মুহতামিমের স্বাক্ষর",
-                photoUri = student.photoUri
-            )
-            canvas.restore()
-
-            doc.finishPage(page)
-
-            val safeName = student.name.replace("\\s+".toRegex(), "_")
-            val pdfFile = File(context.cacheDir, "Student_ID_CR80_${safeName}.pdf")
-            FileOutputStream(pdfFile).use { out -> doc.writeTo(out) }
-            doc.close()
-
-            shareOrOpenPdf(context, pdfFile, "স্টুডেন্ট আইডি কার্ড (CR80 54×85.6mm) - ${student.name}")
-        } catch (e: Exception) {
-            Toast.makeText(context, "আইডি কার্ড তৈরিতে ত্রুটি: ${e.message}", Toast.LENGTH_LONG).show()
-        }
-    }
-
-    fun generateAndShareTeacherIdCardPdf(context: Context, teacher: TeacherEntity) {
-        try {
-            val doc = PdfDocument()
-            val pageInfo = PdfDocument.PageInfo.Builder(CR80_PDF_W_PT, CR80_PDF_H_PT, 1).create()
-            val page = doc.startPage(pageInfo)
-            val canvas = page.canvas
-
-            canvas.save()
-            canvas.scale(CR80_PDF_W_PT.toFloat() / CR80_FULL_W_PX, CR80_PDF_H_PT.toFloat() / CR80_FULL_H_PX)
-
-            val rows = listOf(
-                "আইডি নং:" to "#IKM-T${teacher.id}",
-                "পদবী / বিষয়:" to teacher.subject,
-                "মোবাইল নং:" to teacher.phone.ifEmpty { "নেই" },
-                "যোগদান:" to teacher.joinDate.ifEmpty { "প্রযোজ্য নয়" },
-                "ঠিকানা:" to teacher.address.ifEmpty { "মাদ্রাসা ক্যাম্পাস" }
-            )
-
-            drawCr80IdCardCanvas(
-                canvas = canvas,
-                context = context,
-                isStudent = false,
-                badgeLabel = "শিক্ষক পরিচিতি কার্ড (ID CARD)",
-                name = teacher.name,
-                subtitle = "পদবী: ${teacher.subject}",
-                rows = rows,
-                leftSig = "শিক্ষকের স্বাক্ষর",
-                rightSig = "মুহতামিমের স্বাক্ষর",
-                photoUri = teacher.photoUri
-            )
-            canvas.restore()
-
-            doc.finishPage(page)
-
-            val safeName = teacher.name.replace("\\s+".toRegex(), "_")
-            val pdfFile = File(context.cacheDir, "Teacher_ID_CR80_${safeName}.pdf")
-            FileOutputStream(pdfFile).use { out -> doc.writeTo(out) }
-            doc.close()
-
-            shareOrOpenPdf(context, pdfFile, "শিক্ষক আইডি কার্ড (CR80 54×85.6mm) - ${teacher.name}")
-        } catch (e: Exception) {
-            Toast.makeText(context, "শিক্ষক আইডি কার্ড তৈরিতে ত্রুটি: ${e.message}", Toast.LENGTH_LONG).show()
-        }
-    }
-
-    /**
-     * Generates a 300-DPI CR80 PNG (638x1012 px trim + 2mm bleed = 686x1060 px) for direct print/gallery.
-     */
-    fun generateAndShareCr80IdCardPng(
-        context: Context,
-        student: StudentEntity? = null,
-        teacher: TeacherEntity? = null
-    ) {
-        try {
-            val bitmap = Bitmap.createBitmap(CR80_FULL_W_PX, CR80_FULL_H_PX, Bitmap.Config.ARGB_8888)
-            val canvas = Canvas(bitmap)
-
-            if (student != null) {
                 val rollInfo = if (student.roll.isNotBlank()) " • রোল: ${student.roll}" else ""
                 val rows = buildList {
                     add("আইডি নং:" to "#IKM-${student.id}")
@@ -1250,9 +1274,10 @@ object PdfPrintUtil {
                     add("মাসিক বেতন:" to "${student.fee.toInt()} ৳")
                     add("বিদ্যুৎ বিল:" to "${student.electricBill.toInt()} ৳")
                 }
+
                 drawCr80IdCardCanvas(
                     canvas = canvas,
-                    context = context,
+                    context = appContext,
                     isStudent = true,
                     badgeLabel = "স্টুডেন্ট আইডি কার্ড (CR80)",
                     name = student.name,
@@ -1262,7 +1287,31 @@ object PdfPrintUtil {
                     rightSig = "মুহতামিমের স্বাক্ষর",
                     photoUri = student.photoUri
                 )
-            } else if (teacher != null) {
+                canvas.restore()
+
+                doc.finishPage(page)
+
+                val safeName = student.name.replace("\\s+".toRegex(), "_")
+                val pdfFile = File(appContext.cacheDir, "Student_ID_CR80_${safeName}.pdf")
+                FileOutputStream(pdfFile).use { out -> doc.writeTo(out) }
+
+                shareOrOpenPdf(context, pdfFile, "স্টুডেন্ট আইডি কার্ড (CR80 54×85.6mm) - ${student.name}")
+            } finally {
+                try { doc.close() } catch (_: Exception) {}
+            }
+        }
+
+    fun generateAndShareTeacherIdCardPdf(context: Context, teacher: TeacherEntity) =
+        runAsyncExport(context, "শিক্ষক আইডি কার্ড তৈরি হচ্ছে...", "শিক্ষক আইডি কার্ড তৈরিতে ত্রুটি") { appContext ->
+            val doc = PdfDocument()
+            try {
+                val pageInfo = PdfDocument.PageInfo.Builder(CR80_PDF_W_PT, CR80_PDF_H_PT, 1).create()
+                val page = doc.startPage(pageInfo)
+                val canvas = page.canvas
+
+                canvas.save()
+                canvas.scale(CR80_PDF_W_PT.toFloat() / CR80_FULL_W_PX, CR80_PDF_H_PT.toFloat() / CR80_FULL_H_PX)
+
                 val rows = listOf(
                     "আইডি নং:" to "#IKM-T${teacher.id}",
                     "পদবী / বিষয়:" to teacher.subject,
@@ -1270,9 +1319,10 @@ object PdfPrintUtil {
                     "যোগদান:" to teacher.joinDate.ifEmpty { "প্রযোজ্য নয়" },
                     "ঠিকানা:" to teacher.address.ifEmpty { "মাদ্রাসা ক্যাম্পাস" }
                 )
+
                 drawCr80IdCardCanvas(
                     canvas = canvas,
-                    context = context,
+                    context = appContext,
                     isStudent = false,
                     badgeLabel = "শিক্ষক পরিচিতি কার্ড (ID CARD)",
                     name = teacher.name,
@@ -1282,94 +1332,166 @@ object PdfPrintUtil {
                     rightSig = "মুহতামিমের স্বাক্ষর",
                     photoUri = teacher.photoUri
                 )
-            } else return
+                canvas.restore()
 
-            val personName = (student?.name ?: teacher?.name ?: "ID").replace("\\s+".toRegex(), "_")
-            val fileName = "ID_CR80_300DPI_${personName}.png"
+                doc.finishPage(page)
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                val values = ContentValues().apply {
-                    put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
-                    put(MediaStore.Images.Media.MIME_TYPE, "image/png")
-                    put(MediaStore.Images.Media.RELATIVE_PATH, "${Environment.DIRECTORY_PICTURES}/MadrasaIDCards")
-                    put(MediaStore.Images.Media.IS_PENDING, 1)
-                }
-                val resolver = context.contentResolver
-                val itemUri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
-                if (itemUri != null) {
-                    resolver.openOutputStream(itemUri)?.use { out -> bitmap.compress(Bitmap.CompressFormat.PNG, 100, out) }
-                    values.clear()
-                    values.put(MediaStore.Images.Media.IS_PENDING, 0)
-                    resolver.update(itemUri, values, null, null)
-                }
+                val safeName = teacher.name.replace("\\s+".toRegex(), "_")
+                val pdfFile = File(appContext.cacheDir, "Teacher_ID_CR80_${safeName}.pdf")
+                FileOutputStream(pdfFile).use { out -> doc.writeTo(out) }
+
+                shareOrOpenPdf(context, pdfFile, "শিক্ষক আইডি কার্ড (CR80 54×85.6mm) - ${teacher.name}")
+            } finally {
+                try { doc.close() } catch (_: Exception) {}
             }
+        }
 
-            val cacheFile = File(context.cacheDir, fileName)
-            FileOutputStream(cacheFile).use { out -> bitmap.compress(Bitmap.CompressFormat.PNG, 100, out) }
-            saveFileToDownloads(context, cacheFile, fileName, "image/png")
+    /**
+     * Generates a 300-DPI CR80 PNG (638x1012 px trim + 2mm bleed = 686x1060 px) for direct print/gallery.
+     */
+    fun generateAndShareCr80IdCardPng(
+        context: Context,
+        student: StudentEntity? = null,
+        teacher: TeacherEntity? = null
+    ) {
+        if (student == null && teacher == null) return
+        runAsyncExport(context, "আইডি কার্ড ছবি তৈরি হচ্ছে...", "ছবি তৈরিতে ত্রুটি") { appContext ->
+            var bitmap: Bitmap? = null
+            try {
+                bitmap = Bitmap.createBitmap(CR80_FULL_W_PX, CR80_FULL_H_PX, Bitmap.Config.ARGB_8888)
+                val canvas = Canvas(bitmap)
 
-            val shareUri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", cacheFile)
-            Toast.makeText(context, "৩০০ DPI CR80 (638×1012 + 2mm ব্লিড) ছবি গ্যালারিতে সেভ হয়েছে!", Toast.LENGTH_LONG).show()
+                if (student != null) {
+                    val rollInfo = if (student.roll.isNotBlank()) " • রোল: ${student.roll}" else ""
+                    val rows = buildList {
+                        add("আইডি নং:" to "#IKM-${student.id}")
+                        if (student.roll.isNotBlank()) add("রোল নম্বর:" to student.roll)
+                        add("পিতার নাম:" to student.father.ifEmpty { "প্রযোজ্য নয়" })
+                        add("মোবাইল নং:" to student.phone.ifEmpty { "নেই" })
+                        add("মাসিক বেতন:" to "${student.fee.toInt()} ৳")
+                        add("বিদ্যুৎ বিল:" to "${student.electricBill.toInt()} ৳")
+                    }
+                    drawCr80IdCardCanvas(
+                        canvas = canvas,
+                        context = appContext,
+                        isStudent = true,
+                        badgeLabel = "স্টুডেন্ট আইডি কার্ড (CR80)",
+                        name = student.name,
+                        subtitle = "জামাত: ${student.cls}$rollInfo",
+                        rows = rows,
+                        leftSig = "শ্রেণী শিক্ষকের স্বাক্ষর",
+                        rightSig = "মুহতামিমের স্বাক্ষর",
+                        photoUri = student.photoUri
+                    )
+                } else if (teacher != null) {
+                    val rows = listOf(
+                        "আইডি নং:" to "#IKM-T${teacher.id}",
+                        "পদবী / বিষয়:" to teacher.subject,
+                        "মোবাইল নং:" to teacher.phone.ifEmpty { "নেই" },
+                        "যোগদান:" to teacher.joinDate.ifEmpty { "প্রযোজ্য নয়" },
+                        "ঠিকানা:" to teacher.address.ifEmpty { "মাদ্রাসা ক্যাম্পাস" }
+                    )
+                    drawCr80IdCardCanvas(
+                        canvas = canvas,
+                        context = appContext,
+                        isStudent = false,
+                        badgeLabel = "শিক্ষক পরিচিতি কার্ড (ID CARD)",
+                        name = teacher.name,
+                        subtitle = "পদবী: ${teacher.subject}",
+                        rows = rows,
+                        leftSig = "শিক্ষকের স্বাক্ষর",
+                        rightSig = "মুহতামিমের স্বাক্ষর",
+                        photoUri = teacher.photoUri
+                    )
+                }
 
-            val intent = Intent(Intent.ACTION_SEND).apply {
-                type = "image/png"
-                putExtra(Intent.EXTRA_STREAM, shareUri)
-                putExtra(Intent.EXTRA_SUBJECT, "আইডি কার্ড - $personName")
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                val personName = (student?.name ?: teacher?.name ?: "ID").replace("\\s+".toRegex(), "_")
+                val fileName = "ID_CR80_300DPI_${personName}.png"
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    val values = ContentValues().apply {
+                        put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
+                        put(MediaStore.Images.Media.MIME_TYPE, "image/png")
+                        put(MediaStore.Images.Media.RELATIVE_PATH, "${Environment.DIRECTORY_PICTURES}/MadrasaIDCards")
+                        put(MediaStore.Images.Media.IS_PENDING, 1)
+                    }
+                    val resolver = appContext.contentResolver
+                    val itemUri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+                    if (itemUri != null) {
+                        resolver.openOutputStream(itemUri)?.use { out -> bitmap.compress(Bitmap.CompressFormat.PNG, 100, out) }
+                        values.clear()
+                        values.put(MediaStore.Images.Media.IS_PENDING, 0)
+                        resolver.update(itemUri, values, null, null)
+                    }
+                }
+
+                val cacheFile = File(appContext.cacheDir, fileName)
+                FileOutputStream(cacheFile).use { out -> bitmap.compress(Bitmap.CompressFormat.PNG, 100, out) }
+                saveFileToDownloads(appContext, cacheFile, fileName, "image/png")
+
+                val shareUri = FileProvider.getUriForFile(appContext, "${appContext.packageName}.fileprovider", cacheFile)
+                showToast(appContext, "৩০০ DPI CR80 (638×1012 + 2mm ব্লিড) ছবি গ্যালারিতে সেভ হয়েছে!", Toast.LENGTH_LONG)
+
+                val intent = Intent(Intent.ACTION_SEND).apply {
+                    type = "image/png"
+                    putExtra(Intent.EXTRA_STREAM, shareUri)
+                    putExtra(Intent.EXTRA_SUBJECT, "আইডি কার্ড - $personName")
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                safeStartChooser(context, intent, "আইডি কার্ড ছবি শেয়ার বা প্রিন্ট করুন")
+            } finally {
+                try { bitmap?.recycle() } catch (_: Exception) {}
             }
-            context.startActivity(Intent.createChooser(intent, "আইডি কার্ড ছবি শেয়ার বা প্রিন্ট করুন"))
-        } catch (e: Exception) {
-            Toast.makeText(context, "ছবি তৈরিতে ত্রুটি: ${e.message}", Toast.LENGTH_LONG).show()
         }
     }
 
     // -------------------------------------------------------------------------
     // 8. Fee Receipt PDF (Wrapped text)
     // -------------------------------------------------------------------------
-    fun generateAndShareFeeReceiptPdf(context: Context, student: StudentEntity?, fee: FeeEntity) {
-        try {
+    fun generateAndShareFeeReceiptPdf(context: Context, student: StudentEntity?, fee: FeeEntity) =
+        runAsyncExport(context, "বেতন রসিদ তৈরি হচ্ছে...", "রসিদ তৈরিতে ত্রুটি") { appContext ->
             val doc = PdfDocument()
-            val cursor = A4PageCursor(context, doc, "অর্থ আদায় রসিদ • তারিখ: ${fee.date}")
+            try {
+                val cursor = A4PageCursor(appContext, doc, "অর্থ আদায় রসিদ • তারিখ: ${fee.date}")
 
-            val rows = listOf(
-                "ছাত্রের নাম:" to (student?.name ?: "অজ্ঞাত"),
-                "জামাত ও রোল:" to "${student?.cls ?: ""}${if (!student?.roll.isNullOrBlank()) " (রোল: ${student?.roll})" else ""}",
-                "পিতার নাম:" to (student?.father?.ifEmpty { "প্রযোজ্য নয়" } ?: "প্রযোজ্য নয়"),
-                "খাত / বিবরণ:" to "${fee.type} (${fee.month})",
-                "জমার তারিখ:" to fee.date
-            )
+                val rows = listOf(
+                    "ছাত্রের নাম:" to (student?.name ?: "অজ্ঞাত"),
+                    "জামাত ও রোল:" to "${student?.cls ?: ""}${if (!student?.roll.isNullOrBlank()) " (রোল: ${student?.roll})" else ""}",
+                    "পিতার নাম:" to (student?.father?.ifEmpty { "প্রযোজ্য নয়" } ?: "প্রযোজ্য নয়"),
+                    "খাত / বিবরণ:" to "${fee.type} (${fee.month})",
+                    "জমার তারিখ:" to fee.date
+                )
 
-            val cols = listOf(
-                TableCol("বিবরণ", 180f, Layout.Alignment.ALIGN_NORMAL),
-                TableCol("তথ্য", CONTENT_W - 180f, Layout.Alignment.ALIGN_NORMAL)
-            )
-            drawTableHeader(cursor, cols)
-            rows.forEachIndexed { idx, (k, v) ->
-                drawWrappedTableRow(cursor, cols, listOf(k, v), boldCols = setOf(1), isEvenRow = idx % 2 == 0)
+                val cols = listOf(
+                    TableCol("বিবরণ", 180f, Layout.Alignment.ALIGN_NORMAL),
+                    TableCol("তথ্য", CONTENT_W - 180f, Layout.Alignment.ALIGN_NORMAL)
+                )
+                drawTableHeader(cursor, cols)
+                rows.forEachIndexed { idx, (k, v) ->
+                    drawWrappedTableRow(cursor, cols, listOf(k, v), boldCols = setOf(1), isEvenRow = idx % 2 == 0)
+                }
+
+                cursor.y += 14f
+                drawWrappedSummaryBanner(
+                    cursor = cursor,
+                    title = "জমার পরিমাণ: ${fee.amount.toInt()} ৳",
+                    subtitle = "রসিদ নং: #REC-${fee.id}  •  খাত: ${fee.type}",
+                    badgeText = "পরিশোধিত",
+                    isSuccess = true
+                )
+
+                cursor.drawSignatures("আদায়কারীর স্বাক্ষর", "মুহতামিমের সীল ও স্বাক্ষর")
+                cursor.finishDocument()
+
+                val safeName = (student?.name ?: "student").replace("\\s+".toRegex(), "_")
+                val pdfFile = File(appContext.cacheDir, "Receipt_${safeName}_${fee.month.replace("\\s+".toRegex(), "_")}.pdf")
+                FileOutputStream(pdfFile).use { out -> doc.writeTo(out) }
+
+                shareOrOpenPdf(context, pdfFile, "বেতন রসিদ - ${student?.name}")
+            } finally {
+                try { doc.close() } catch (_: Exception) {}
             }
-
-            cursor.y += 14f
-            drawWrappedSummaryBanner(
-                cursor = cursor,
-                title = "জমার পরিমাণ: ${fee.amount.toInt()} ৳",
-                subtitle = "রসিদ নং: #REC-${fee.id}  •  খাত: ${fee.type}",
-                badgeText = "পরিশোধিত",
-                isSuccess = true
-            )
-
-            cursor.drawSignatures("আদায়কারীর স্বাক্ষর", "মুহতামিমের সীল ও স্বাক্ষর")
-            cursor.finishDocument()
-
-            val safeName = (student?.name ?: "student").replace("\\s+".toRegex(), "_")
-            val pdfFile = File(context.cacheDir, "Receipt_${safeName}_${fee.month.replace("\\s+".toRegex(), "_")}.pdf")
-            FileOutputStream(pdfFile).use { out -> doc.writeTo(out) }
-            doc.close()
-
-            shareOrOpenPdf(context, pdfFile, "বেতন রসিদ - ${student?.name}")
-        } catch (e: Exception) {
-            Toast.makeText(context, "রসিদ তৈরিতে ত্রুটি: ${e.message}", Toast.LENGTH_LONG).show()
         }
-    }
 
     // -------------------------------------------------------------------------
     // 9. Admit Card (প্রবেশ পত্র) A4 PDF (Supports single or batch list, auto page-break)
@@ -1381,105 +1503,107 @@ object PdfPrintUtil {
         students: List<StudentEntity>
     ) {
         if (students.isEmpty()) {
-            Toast.makeText(context, "প্রবেশপত্র তৈরির জন্য কোন ছাত্র পাওয়া যায়নি", Toast.LENGTH_SHORT).show()
+            showToast(context, "প্রবেশপত্র তৈরির জন্য কোন ছাত্র পাওয়া যায়নি", Toast.LENGTH_SHORT)
             return
         }
-        try {
+        runAsyncExport(context, "প্রবেশ পত্র PDF তৈরি হচ্ছে...", "প্রবেশ পত্র তৈরিতে ত্রুটি") { appContext ->
             val doc = PdfDocument()
-            val cursor = A4PageCursor(context, doc, "পরীক্ষার প্রবেশ পত্র (ADMIT CARD) • $examName")
+            try {
+                val cursor = A4PageCursor(appContext, doc, "পরীক্ষার প্রবেশ পত্র (ADMIT CARD) • $examName")
 
-            students.forEachIndexed { index, student ->
-                val studentPhoto = loadPhotoBitmap(context, student.photoUri, 54)
-                val infoPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-                    color = 0xFF1E293B.toInt()
-                    textSize = 11f
-                }
-                val boldPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-                    color = 0xFF0A5C36.toInt()
-                    textSize = 12f
-                    typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-                }
+                students.forEachIndexed { _, student ->
+                    val studentPhoto = loadPhotoBitmap(appContext, student.photoUri, 54)
+                    val infoPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+                        color = 0xFF1E293B.toInt()
+                        textSize = 11f
+                    }
+                    val boldPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+                        color = 0xFF0A5C36.toInt()
+                        textSize = 12f
+                        typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                    }
 
-                val infoW = (CONTENT_W - 96f).toInt()
-                val rollStr = if (student.roll.isNotBlank()) student.roll else "${student.id}"
-                val nameL = makeStaticLayout("পরীক্ষার্থীর নাম: ${student.name}", boldPaint, infoW)
-                val detailsText = buildString {
-                    append("জামাত: ${student.cls}   |   রোল নং: $rollStr\n")
-                    append("পিতার নাম: ${student.father.ifEmpty { "প্রযোজ্য নয়" }}   |   মোবাইল: ${student.phone.ifEmpty { "নেই" }}\n")
-                    append("পরীক্ষার নাম: $examName")
-                    if (examScheduleNote.isNotBlank()) append("\nসময়সূচী / নির্দেশনা: $examScheduleNote")
-                }
-                val detailsL = makeStaticLayout(detailsText, infoPaint, infoW, lineSpacingMult = 1.25f)
-                val cardH = maxOf(140f, nameL.height + detailsL.height + 76f)
+                    val infoW = (CONTENT_W - 96f).toInt()
+                    val rollStr = if (student.roll.isNotBlank()) student.roll else "${student.id}"
+                    val nameL = makeStaticLayout("পরীক্ষার্থীর নাম: ${student.name}", boldPaint, infoW)
+                    val detailsText = buildString {
+                        append("জামাত: ${student.cls}   |   রোল নং: $rollStr\n")
+                        append("পিতার নাম: ${student.father.ifEmpty { "প্রযোজ্য নয়" }}   |   মোবাইল: ${student.phone.ifEmpty { "নেই" }}\n")
+                        append("পরীক্ষার নাম: $examName")
+                        if (examScheduleNote.isNotBlank()) append("\nসময়সূচী / নির্দেশনা: $examScheduleNote")
+                    }
+                    val detailsL = makeStaticLayout(detailsText, infoPaint, infoW, lineSpacingMult = 1.25f)
+                    val cardH = maxOf(140f, nameL.height + detailsL.height + 76f)
 
-                cursor.ensureSpace(cardH + 14f)
+                    cursor.ensureSpace(cardH + 14f)
 
-                val top = cursor.y
-                val bottom = top + cardH
-                cursor.canvas.drawRoundRect(LEFT, top, RIGHT, bottom, 8f, 8f, Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                    color = 0xFFF8FBF9.toInt()
-                })
-                cursor.canvas.drawRoundRect(LEFT, top, RIGHT, bottom, 8f, 8f, Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                    color = 0xFF0A5C36.toInt()
-                    style = Paint.Style.STROKE
-                    strokeWidth = 1.2f
-                })
-
-                // Top strip of admit card
-                cursor.canvas.drawRoundRect(LEFT, top, RIGHT, top + 24f, 6f, 6f, Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                    color = 0xFF0A5C36.toInt()
-                })
-                val cardHead = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                    color = Color.WHITE
-                    textSize = 10.5f
-                    typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-                }
-                cursor.canvas.drawText("প্রবেশ পত্র #IKM-ADM-${student.id}  •  $examName", LEFT + 12f, top + 16f, cardHead)
-
-                if (studentPhoto != null) {
-                    cursor.canvas.drawBitmap(studentPhoto, LEFT + 12f, top + 34f, null)
-                } else {
-                    cursor.canvas.drawRoundRect(LEFT + 12f, top + 34f, LEFT + 66f, top + 88f, 6f, 6f, Paint().apply {
-                        color = 0xFFE2E8F0.toInt()
+                    val top = cursor.y
+                    val bottom = top + cardH
+                    cursor.canvas.drawRoundRect(LEFT, top, RIGHT, bottom, 8f, 8f, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                        color = 0xFFF8FBF9.toInt()
                     })
-                    val noPic = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                        color = 0xFF64748B.toInt()
+                    cursor.canvas.drawRoundRect(LEFT, top, RIGHT, bottom, 8f, 8f, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                        color = 0xFF0A5C36.toInt()
+                        style = Paint.Style.STROKE
+                        strokeWidth = 1.2f
+                    })
+
+                    // Top strip of admit card
+                    cursor.canvas.drawRoundRect(LEFT, top, RIGHT, top + 24f, 6f, 6f, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                        color = 0xFF0A5C36.toInt()
+                    })
+                    val cardHead = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                        color = Color.WHITE
+                        textSize = 10.5f
+                        typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                    }
+                    cursor.canvas.drawText("প্রবেশ পত্র #IKM-ADM-${student.id}  •  $examName", LEFT + 12f, top + 16f, cardHead)
+
+                    if (studentPhoto != null) {
+                        cursor.canvas.drawBitmap(studentPhoto, LEFT + 12f, top + 34f, null)
+                        try { studentPhoto.recycle() } catch (_: Exception) {}
+                    } else {
+                        cursor.canvas.drawRoundRect(LEFT + 12f, top + 34f, LEFT + 66f, top + 88f, 6f, 6f, Paint().apply {
+                            color = 0xFFE2E8F0.toInt()
+                        })
+                        val noPic = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                            color = 0xFF64748B.toInt()
+                            textSize = 9f
+                            textAlign = Paint.Align.CENTER
+                        }
+                        cursor.canvas.drawText("ছবি", LEFT + 39f, top + 64f, noPic)
+                    }
+
+                    val tx = LEFT + 80f
+                    cursor.canvas.drawLayoutAt(nameL, tx, top + 34f)
+                    cursor.canvas.drawLayoutAt(detailsL, tx, top + 38f + nameL.height)
+
+                    val sigY = bottom - 22f
+                    val sigLine = Paint().apply { color = 0xFF475569.toInt(); strokeWidth = 0.8f }
+                    cursor.canvas.drawLine(RIGHT - 165f, sigY, RIGHT - 18f, sigY, sigLine)
+                    val sigTxt = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                        color = 0xFF334155.toInt()
                         textSize = 9f
                         textAlign = Paint.Align.CENTER
                     }
-                    cursor.canvas.drawText("ছবি", LEFT + 39f, top + 64f, noPic)
+                    cursor.canvas.drawText("মুহতামিমের সীল ও স্বাক্ষর", RIGHT - 91f, sigY + 12f, sigTxt)
+
+                    cursor.y = bottom + 14f
                 }
 
-                val tx = LEFT + 80f
-                cursor.canvas.drawLayoutAt(nameL, tx, top + 34f)
-                cursor.canvas.drawLayoutAt(detailsL, tx, top + 38f + nameL.height)
-
-                val sigY = bottom - 22f
-                val sigLine = Paint().apply { color = 0xFF475569.toInt(); strokeWidth = 0.8f }
-                cursor.canvas.drawLine(RIGHT - 165f, sigY, RIGHT - 18f, sigY, sigLine)
-                val sigTxt = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                    color = 0xFF334155.toInt()
-                    textSize = 9f
-                    textAlign = Paint.Align.CENTER
+                cursor.finishDocument()
+                val fileName = if (students.size == 1) {
+                    "Admit_${students.first().name.replace("\\s+".toRegex(), "_")}.pdf"
+                } else {
+                    "Admit_Cards_${examName.replace("\\s+".toRegex(), "_")}.pdf"
                 }
-                cursor.canvas.drawText("মুহতামিমের সীল ও স্বাক্ষর", RIGHT - 91f, sigY + 12f, sigTxt)
+                val pdfFile = File(appContext.cacheDir, fileName)
+                FileOutputStream(pdfFile).use { out -> doc.writeTo(out) }
 
-                cursor.y = bottom + 14f
+                shareOrOpenPdf(context, pdfFile, "প্রবেশ পত্র - $examName")
+            } finally {
+                try { doc.close() } catch (_: Exception) {}
             }
-
-            cursor.finishDocument()
-            val fileName = if (students.size == 1) {
-                "Admit_${students.first().name.replace("\\s+".toRegex(), "_")}.pdf"
-            } else {
-                "Admit_Cards_${examName.replace("\\s+".toRegex(), "_")}.pdf"
-            }
-            val pdfFile = File(context.cacheDir, fileName)
-            FileOutputStream(pdfFile).use { out -> doc.writeTo(out) }
-            doc.close()
-
-            shareOrOpenPdf(context, pdfFile, "প্রবেশ পত্র - $examName")
-        } catch (e: Exception) {
-            Toast.makeText(context, "প্রবেশ পত্র তৈরিতে ত্রুটি: ${e.message}", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -1492,41 +1616,44 @@ object PdfPrintUtil {
         data class TextBlock(val layout: StaticLayout, val bottomGap: Float) : QpItem()
     }
 
-    fun generateAndShareQuestionPaperPdf(context: Context, paper: QuestionPaperEntity) {
-        try {
-            // Standard A4 Landscape (297mm x 210mm) at 72 DPI = 842 x 595 pt
-            val pageW = A4_HEIGHT // 842
-            val pageH = A4_WIDTH  // 595
-            val halfW = pageW / 2f // 421f
+    fun generateAndShareQuestionPaperPdf(context: Context, paper: QuestionPaperEntity) =
+        runAsyncExport(context, "প্রশ্নপত্র PDF তৈরি হচ্ছে...", "প্রশ্নপত্র তৈরিতে ত্রুটি") { appContext ->
+            val doc = PdfDocument()
+            var logoBmp: Bitmap? = null
+            try {
+                // Standard A4 Landscape (297mm x 210mm) at 72 DPI = 842 x 595 pt
+                val pageW = A4_HEIGHT // 842
+                val pageH = A4_WIDTH  // 595
+                val halfW = pageW / 2f // 421f
 
-            // Symmetric margins inside each 421pt half (20pt outer frame margin, 30pt content margin)
-            val borderLeft = 20f
-            val borderRight = halfW - 20f // 401f
-            val borderTop = 20f
-            val borderBottom = pageH - 20f // 575f
+                // Symmetric margins inside each 421pt half (20pt outer frame margin, 30pt content margin)
+                val borderLeft = 20f
+                val borderRight = halfW - 20f // 401f
+                val borderTop = 20f
+                val borderBottom = pageH - 20f // 575f
 
-            val colLeft = 30f
-            val colRight = halfW - 30f // 391f
-            val colW = colRight - colLeft // 361f
-            val colTopStart = 30f
-            val footerY = pageH - 30f // 565f
-            val maxContentY = footerY - 22f // 543f
+                val colLeft = 30f
+                val colRight = halfW - 30f // 391f
+                val colW = colRight - colLeft // 361f
+                val colTopStart = 30f
+                val footerY = pageH - 30f // 565f
+                val maxContentY = footerY - 22f // 543f
 
-            val logoBmp = loadHighResMadrasaLogo(context, 512)
+                logoBmp = loadHighResMadrasaLogo(appContext, 512)
 
-            // Pre-build First-Page Header & Continuation Header layouts once (shared by both halves)
-            val titlePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.WHITE
-                textSize = 11f
-                typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-            }
-            val addrPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = 0xFFE2E8F0.toInt()
-                textSize = 8.2f
-            }
-            val headerTextStart = if (logoBmp != null) colLeft + 48f else colLeft + 8f
-            val headerTextW = (colRight - headerTextStart - 8f).toInt()
-            val madrasaInfo = MadrasaInfoStore.getInfo(context)
+                // Pre-build First-Page Header & Continuation Header layouts once (shared by both halves)
+                val titlePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+                    color = Color.WHITE
+                    textSize = 11f
+                    typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                }
+                val addrPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+                    color = 0xFFE2E8F0.toInt()
+                    textSize = 8.2f
+                }
+                val headerTextStart = if (logoBmp != null) colLeft + 48f else colLeft + 8f
+                val headerTextW = (colRight - headerTextStart - 8f).toInt()
+                val madrasaInfo = MadrasaInfoStore.getInfo(appContext)
             val titleLayout = makeStaticLayout(madrasaInfo.name, titlePaint, headerTextW, Layout.Alignment.ALIGN_CENTER, 1.1f, 0.5f)
             val addrLayout = makeStaticLayout(madrasaInfo.address, addrPaint, headerTextW, Layout.Alignment.ALIGN_CENTER, 1.1f, 0.5f)
             val headerBoxH = maxOf(50f, titleLayout.height + addrLayout.height + 24f)
@@ -1750,7 +1877,6 @@ object PdfPrintUtil {
                 )
             }
 
-            val doc = PdfDocument()
             val cutLinePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = 0xFF64748B.toInt()
                 style = Paint.Style.STROKE
@@ -1788,66 +1914,199 @@ object PdfPrintUtil {
             }
 
             val safeSub = paper.subject.replace("\\s+".toRegex(), "_")
-            val pdfFile = File(context.cacheDir, "Question_${safeSub}_${paper.className.replace("\\s+".toRegex(), "_")}.pdf")
+            val pdfFile = File(appContext.cacheDir, "Question_${safeSub}_${paper.className.replace("\\s+".toRegex(), "_")}.pdf")
             FileOutputStream(pdfFile).use { out -> doc.writeTo(out) }
-            doc.close()
 
             shareOrOpenPdf(context, pdfFile, "প্রশ্নপত্র (২-কপি ল্যান্ডস্কেপ) - ${paper.subject} (${paper.className})")
-        } catch (e: Exception) {
-            Toast.makeText(context, "প্রশ্নপত্র তৈরিতে ত্রুটি: ${e.message}", Toast.LENGTH_LONG).show()
+            } finally {
+                try { logoBmp?.recycle() } catch (_: Exception) {}
+                try { doc.close() } catch (_: Exception) {}
+            }
         }
-    }
 
     // -------------------------------------------------------------------------
-    // 11. Class Routine (ক্লাস রুটিন) Multi-page A4 Wrapped PDF
+    // 11. Annual Class Routine (বাৎসরিক ক্লাস রুটিন) Boxed Table Multi-page A4 PDF
     // -------------------------------------------------------------------------
+    private fun drawRoutineSectionBanner(cursor: A4PageCursor, bannerText: String) {
+        val textPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = 0xFF063D23.toInt()
+            textSize = 10.5f
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        }
+        val layout = makeStaticLayout(
+            bannerText,
+            textPaint,
+            (CONTENT_W - 16f).toInt().coerceAtLeast(24),
+            Layout.Alignment.ALIGN_NORMAL,
+            1.15f,
+            1f
+        )
+        val boxH = maxOf(26f, layout.height + 12f)
+        cursor.ensureSpace(boxH + 56f)
+
+        val top = cursor.y
+        cursor.canvas.drawRect(LEFT, top, RIGHT, top + boxH, Paint().apply { color = 0xFFEAF7EF.toInt() })
+        cursor.canvas.drawRect(LEFT, top, RIGHT, top + boxH, Paint().apply {
+            color = 0xFF0A5C36.toInt()
+            style = Paint.Style.STROKE
+            strokeWidth = 0.9f
+        })
+        cursor.canvas.save()
+        cursor.canvas.clipRect(LEFT + 1f, top + 0.5f, RIGHT - 1f, top + boxH - 0.5f)
+        cursor.canvas.drawLayoutAt(layout, LEFT + 8f, top + (boxH - layout.height) / 2f)
+        cursor.canvas.restore()
+        cursor.y += boxH
+    }
+
     fun generateAndShareClassRoutinePdf(
         context: Context,
         classFilterTitle: String,
         routines: List<ClassRoutineEntity>
-    ) {
+    ) = runAsyncExport(context, "বাৎসরিক ক্লাস রুটিন PDF তৈরি হচ্ছে...", "রুটিন তৈরিতে ত্রুটি") { appContext ->
+        val doc = PdfDocument()
         try {
-            val doc = PdfDocument()
-            val cursor = A4PageCursor(context, doc, "সাপ্তাহিক ক্লাস রুটিন • $classFilterTitle")
+            val cursor = A4PageCursor(appContext, doc, "বাৎসরিক ক্লাস রুটিন • $classFilterTitle")
 
+            // Exact boxed columns summing to CONTENT_W (527f); wider boxes for বিষয় & শিক্ষকের নাম
             val cols = listOf(
-                TableCol("বার / দিন", 85f, Layout.Alignment.ALIGN_CENTER),
-                TableCol("শ্রেণী / জামাত", 105f, Layout.Alignment.ALIGN_NORMAL),
-                TableCol("সময়", 102f, Layout.Alignment.ALIGN_CENTER),
-                TableCol("বিষয় / কিতাব", 120f, Layout.Alignment.ALIGN_NORMAL),
-                TableCol("শিক্ষক", 115f, Layout.Alignment.ALIGN_NORMAL)
+                TableCol("নং", 36f, Layout.Alignment.ALIGN_CENTER),
+                TableCol("সময়", 98f, Layout.Alignment.ALIGN_CENTER),
+                TableCol("বিষয়", 163f, Layout.Alignment.ALIGN_NORMAL),
+                TableCol("শিক্ষকের নাম", 156f, Layout.Alignment.ALIGN_NORMAL),
+                TableCol("মোট সময়", 74f, Layout.Alignment.ALIGN_CENTER)
             )
-            drawTableHeader(cursor, cols)
 
             if (routines.isEmpty()) {
+                drawTableHeader(cursor, cols, showCellBorders = true)
                 drawWrappedTableRow(
-                    cursor,
-                    listOf(TableCol("বিবরণ", CONTENT_W, Layout.Alignment.ALIGN_CENTER)),
-                    listOf("কোন ক্লাস রুটিন যুক্ত করা হয়নি।"),
-                    isEvenRow = true
+                    cursor = cursor,
+                    cols = listOf(TableCol("বিবরণ", CONTENT_W, Layout.Alignment.ALIGN_CENTER)),
+                    values = listOf("কোন বাৎসরিক ক্লাস রুটিন যুক্ত করা হয়নি।"),
+                    isEvenRow = true,
+                    repeatHeader = false,
+                    showHeaderCellBorders = true
                 )
             } else {
-                routines.forEachIndexed { idx, r ->
+                val grandMinutes = routines.sumOf { r ->
+                    RoutineTimeUtil.parseDurationLabelMinutes(r.duration, r.timeSlot)
+                }
+                val grandDurationLabel = if (grandMinutes > 0) RoutineTimeUtil.formatMinutesBengali(grandMinutes) else "-"
+
+                // Top summary bar
+                val summaryPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+                    color = 0xFF1E293B.toInt()
+                    textSize = 9.8f
+                    typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                }
+                val summaryText = "শ্রেণী ফিল্টার: $classFilterTitle   •   মোট ক্লাস: ${RoutineTimeUtil.toBengaliDigits(routines.size)} টি   •   মোট পাঠদান সময়: $grandDurationLabel"
+                val summaryLayout = makeStaticLayout(
+                    summaryText,
+                    summaryPaint,
+                    (CONTENT_W - 16f).toInt(),
+                    Layout.Alignment.ALIGN_CENTER,
+                    1.15f,
+                    1f
+                )
+                val summaryH = maxOf(24f, summaryLayout.height + 10f)
+                cursor.ensureSpace(summaryH + 8f)
+                val sTop = cursor.y
+                cursor.canvas.drawRoundRect(LEFT, sTop, RIGHT, sTop + summaryH, 5f, 5f, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    color = 0xFFF1F5F9.toInt()
+                })
+                cursor.canvas.drawRoundRect(LEFT, sTop, RIGHT, sTop + summaryH, 5f, 5f, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    color = 0xFFCBD5E1.toInt()
+                    style = Paint.Style.STROKE
+                    strokeWidth = 0.8f
+                })
+                cursor.canvas.save()
+                cursor.canvas.clipRect(LEFT + 1f, sTop + 0.5f, RIGHT - 1f, sTop + summaryH - 0.5f)
+                cursor.canvas.drawLayoutAt(summaryLayout, LEFT + 8f, sTop + (summaryH - summaryLayout.height) / 2f)
+                cursor.canvas.restore()
+                cursor.y += summaryH + 10f
+
+                val groupedByClass = routines.groupBy { it.className.ifBlank { "সাধারণ শ্রেণী" } }
+                groupedByClass.forEach { (clsName, classList) ->
+                    val sessionLabels = classList.map { it.dayOfWeek.trim() }
+                        .filter { it.isNotBlank() }
+                        .distinct()
+                        .joinToString(", ")
+                    val sectionLabel = buildString {
+                        append("শ্রেণী / জামাত: $clsName")
+                        if (sessionLabels.isNotBlank()) append("  •  সময়কাল: $sessionLabels")
+                        append("  •  ক্লাস সংখ্যা: ${RoutineTimeUtil.toBengaliDigits(classList.size)} টি")
+                    }
+
+                    drawRoutineSectionBanner(cursor, sectionLabel)
+                    drawTableHeader(cursor, cols, showCellBorders = true)
+
+                    classList.forEachIndexed { idx, r ->
+                        val resolvedDuration = RoutineTimeUtil.resolveDurationDisplay(r.duration, r.timeSlot)
+                        drawWrappedTableRow(
+                            cursor = cursor,
+                            cols = cols,
+                            values = listOf(
+                                RoutineTimeUtil.toBengaliDigits(idx + 1),
+                                r.timeSlot.ifBlank { "-" },
+                                r.subject.ifBlank { "-" },
+                                r.teacherName.ifBlank { "-" },
+                                resolvedDuration
+                            ),
+                            textColors = listOf(
+                                0xFF0A5C36.toInt(),
+                                0xFF0F172A.toInt(),
+                                0xFF064E3B.toInt(),
+                                0xFF1E293B.toInt(),
+                                0xFF0F766E.toInt()
+                            ),
+                            boldCols = setOf(0, 2, 4),
+                            isEvenRow = idx % 2 == 0,
+                            repeatHeader = true,
+                            showHeaderCellBorders = true
+                        )
+                    }
+
+                    val classMinutes = classList.sumOf { r ->
+                        RoutineTimeUtil.parseDurationLabelMinutes(r.duration, r.timeSlot)
+                    }
+                    val classDurationLabel = if (classMinutes > 0) RoutineTimeUtil.formatMinutesBengali(classMinutes) else "-"
                     drawWrappedTableRow(
                         cursor = cursor,
                         cols = cols,
-                        values = listOf(r.dayOfWeek, r.className, r.timeSlot, r.subject, r.teacherName.ifEmpty { "-" }),
-                        boldCols = setOf(0, 3),
-                        isEvenRow = idx % 2 == 0
+                        values = listOf(
+                            "মোট",
+                            "${RoutineTimeUtil.toBengaliDigits(classList.size)} টি পিরিয়ড",
+                            "বাৎসরিক নির্ধারিত পাঠদান সময়",
+                            "-",
+                            classDurationLabel
+                        ),
+                        textColors = listOf(
+                            0xFF063D23.toInt(),
+                            0xFF063D23.toInt(),
+                            0xFF063D23.toInt(),
+                            0xFF64748B.toInt(),
+                            0xFF063D23.toInt()
+                        ),
+                        boldCols = setOf(0, 1, 2, 4),
+                        isEvenRow = false,
+                        repeatHeader = false,
+                        showHeaderCellBorders = true,
+                        rowBgOverride = 0xFFEAF7EF.toInt(),
+                        borderColorOverride = 0xFF0A5C36.toInt()
                     )
+
+                    cursor.y += 12f
                 }
             }
 
             cursor.drawSignatures("রুটিন প্রস্তুতকারক", "মুহতামিমের সীল ও স্বাক্ষর")
             cursor.finishDocument()
 
-            val pdfFile = File(context.cacheDir, "Class_Routine_${classFilterTitle.replace("\\s+".toRegex(), "_")}.pdf")
+            val pdfFile = File(appContext.cacheDir, "Annual_Class_Routine_${classFilterTitle.replace("\\s+".toRegex(), "_")}.pdf")
             FileOutputStream(pdfFile).use { out -> doc.writeTo(out) }
-            doc.close()
 
-            shareOrOpenPdf(context, pdfFile, "ক্লাস রুটিন - $classFilterTitle")
-        } catch (e: Exception) {
-            Toast.makeText(context, "রুটিন তৈরিতে ত্রুটি: ${e.message}", Toast.LENGTH_LONG).show()
+            shareOrOpenPdf(context, pdfFile, "বাৎসরিক ক্লাস রুটিন - $classFilterTitle")
+        } finally {
+            try { doc.close() } catch (_: Exception) {}
         }
     }
 
@@ -1858,10 +2117,10 @@ object PdfPrintUtil {
         context: Context,
         title: String,
         entries: List<MeritPdfEntry>
-    ) {
+    ) = runAsyncExport(context, "মেধাতালিকা PDF তৈরি হচ্ছে...", "মেধাতালিকা তৈরিতে ত্রুটি") { appContext ->
+        val doc = PdfDocument()
         try {
-            val doc = PdfDocument()
-            val cursor = A4PageCursor(context, doc, "মেধাতালিকা • $title")
+            val cursor = A4PageCursor(appContext, doc, "মেধাতালিকা • $title")
 
             val cols = listOf(
                 TableCol("মেধাস্থান", 62f, Layout.Alignment.ALIGN_CENTER),
@@ -1906,13 +2165,12 @@ object PdfPrintUtil {
             cursor.drawSignatures("পরীক্ষা নিয়ন্ত্রক", "মুহতামিমের সীল ও স্বাক্ষর")
             cursor.finishDocument()
 
-            val pdfFile = File(context.cacheDir, "Merit_List_${title.replace("\\s+".toRegex(), "_")}.pdf")
+            val pdfFile = File(appContext.cacheDir, "Merit_List_${title.replace("\\s+".toRegex(), "_")}.pdf")
             FileOutputStream(pdfFile).use { out -> doc.writeTo(out) }
-            doc.close()
 
             shareOrOpenPdf(context, pdfFile, "মেধাতালিকা - $title")
-        } catch (e: Exception) {
-            Toast.makeText(context, "মেধাতালিকা তৈরিতে ত্রুটি: ${e.message}", Toast.LENGTH_LONG).show()
+        } finally {
+            try { doc.close() } catch (_: Exception) {}
         }
     }
 
@@ -1987,6 +2245,7 @@ object PdfPrintUtil {
 
         if (photoBmp != null) {
             cursor.canvas.drawBitmap(photoBmp, LEFT + 12f, top + (boxH - 54f) / 2f, null)
+            try { photoBmp.recycle() } catch (_: Exception) {}
         }
 
         cursor.canvas.drawLayoutAt(topL, textStart, top + 10f)
@@ -2088,11 +2347,12 @@ object PdfPrintUtil {
     }
 
     private fun shareOrOpenPdf(context: Context, file: File, title: String) {
+        val appContext = context.applicationContext
         try {
-            val savedUri = saveFileToDownloads(context, file, file.name, "application/pdf")
+            val savedUri = saveFileToDownloads(appContext, file, file.name, "application/pdf")
             val shareUri = FileProvider.getUriForFile(
-                context,
-                "${context.packageName}.fileprovider",
+                appContext,
+                "${appContext.packageName}.fileprovider",
                 file
             )
 
@@ -2101,7 +2361,7 @@ object PdfPrintUtil {
             } else {
                 "পিডিএফ ফাইল প্রস্তুত হয়েছে!"
             }
-            Toast.makeText(context, toastMsg, Toast.LENGTH_LONG).show()
+            showToast(appContext, toastMsg, Toast.LENGTH_LONG)
 
             val intent = Intent(Intent.ACTION_SEND).apply {
                 type = "application/pdf"
@@ -2109,9 +2369,9 @@ object PdfPrintUtil {
                 putExtra(Intent.EXTRA_SUBJECT, title)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
-            context.startActivity(Intent.createChooser(intent, "$title - PDF শেয়ার বা ওপেন করুন"))
+            safeStartChooser(context, intent, "$title - PDF শেয়ার বা ওপেন করুন")
         } catch (e: Exception) {
-            Toast.makeText(context, "পিডিএফ ওপেন করতে ত্রুটি: ${e.message}", Toast.LENGTH_SHORT).show()
+            showToast(appContext, "পিডিএফ ওপেন করতে ত্রুটি: ${e.message}", Toast.LENGTH_SHORT)
         }
     }
 

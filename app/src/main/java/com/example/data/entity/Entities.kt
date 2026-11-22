@@ -51,7 +51,12 @@ data class ResultEntity(
     val avg: Double,
     val date: String
 ) {
+    @androidx.room.Ignore
+    @Transient
+    private var cachedSubjectList: List<SubjectMark>? = null
+
     fun getSubjectList(): List<SubjectMark> {
+        cachedSubjectList?.let { return it }
         val list = mutableListOf<SubjectMark>()
         try {
             val arr = JSONArray(subjectsJson)
@@ -66,6 +71,7 @@ data class ResultEntity(
             }
         } catch (_: Exception) {
         }
+        cachedSubjectList = list
         return list
     }
 
@@ -149,5 +155,6 @@ data class ClassRoutineEntity(
     val dayOfWeek: String,
     val timeSlot: String,
     val subject: String,
-    val teacherName: String
+    val teacherName: String,
+    val duration: String = ""
 )

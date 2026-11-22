@@ -24,6 +24,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.components.madrasaCardBorder
+import com.example.ui.components.safeStartActivity
 import com.example.ui.theme.MadrasaAccent
 import com.example.ui.theme.MadrasaGold
 import com.example.ui.theme.MadrasaPrimary
@@ -112,7 +113,7 @@ fun DeveloperScreen(onBack: () -> Unit) {
                     value = "+8801934411199",
                     onClick = {
                         val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:+8801934411199"))
-                        context.startActivity(intent)
+                        safeStartActivity(context, intent, "কল করার অ্যাপ পাওয়া যায়নি")
                     }
                 )
 
@@ -124,7 +125,7 @@ fun DeveloperScreen(onBack: () -> Unit) {
                     value = "ferdausharfin@gmail.com",
                     onClick = {
                         val intent = Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:ferdausharfin@gmail.com"))
-                        context.startActivity(intent)
+                        safeStartActivity(context, intent, "ইমেইল অ্যাপ পাওয়া যায়নি")
                     }
                 )
 
@@ -136,7 +137,7 @@ fun DeveloperScreen(onBack: () -> Unit) {
                     value = "ferdausharfin@yahoo.com",
                     onClick = {
                         val intent = Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:ferdausharfin@yahoo.com"))
-                        context.startActivity(intent)
+                        safeStartActivity(context, intent, "ইমেইল অ্যাপ পাওয়া যায়নি")
                     }
                 )
             }
@@ -232,7 +233,7 @@ fun DeveloperScreen(onBack: () -> Unit) {
                     Button(
                         onClick = {
                             val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:+8801934411199"))
-                            context.startActivity(intent)
+                            safeStartActivity(context, intent, "কল করার অ্যাপ পাওয়া যায়নি")
                         },
                         modifier = Modifier
                             .weight(1f)
@@ -248,7 +249,7 @@ fun DeveloperScreen(onBack: () -> Unit) {
                     Button(
                         onClick = {
                             val intent = Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:+8801934411199"))
-                            context.startActivity(intent)
+                            safeStartActivity(context, intent, "মেসেজ অ্যাপ পাওয়া যায়নি")
                         },
                         modifier = Modifier
                             .weight(1f)
@@ -264,7 +265,7 @@ fun DeveloperScreen(onBack: () -> Unit) {
                     Button(
                         onClick = {
                             val intent = Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:ferdausharfin@gmail.com"))
-                            context.startActivity(intent)
+                            safeStartActivity(context, intent, "ইমেইল অ্যাপ পাওয়া যায়নি")
                         },
                         modifier = Modifier
                             .weight(1f)

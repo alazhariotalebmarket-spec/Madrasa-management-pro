@@ -19,6 +19,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.ui.components.SubScreenTopBar
 import com.example.ui.viewmodel.MadrasaViewModel
 
@@ -38,7 +39,7 @@ private fun subScreenMeta(route: String): Pair<String, String> = when (route) {
     "results" -> "পরীক্ষার রেজাল্ট" to "নম্বর এন্ট্রি, মার্কশিট ও PDF"
     "id_card" -> "আইডি কার্ড" to "ছাত্র ও শিক্ষকের CR80 প্রিন্ট কার্ড"
     "admit_card" -> "প্রবেশ পত্র" to "পরীক্ষার এডমিট কার্ড ও PDF"
-    "routine" -> "ক্লাস রুটিন" to "সাপ্তাহিক পাঠদান সময়সূচী"
+    "routine" -> "বাৎসরিক ক্লাস রুটিন" to "বার্ষিক পাঠদান সময়সূচী ও পিরিয়ড তালিকা"
     "teachers" -> "শিক্ষকের বেতন ও তথ্য" to "শিক্ষক নিবন্ধন, বেতন প্রদান ও রিপোর্ট"
     "accounts" -> "আয় ব্যয় হিসাব" to "সাধারণ খরচ, মুহতামিম জমা ও আর্থিক বিবরণী"
     "expenses" -> "খরচ ও মুহতামিম জমা" to "ব্যয় এন্ট্রি ও PDF রিপোর্ট"
@@ -60,16 +61,16 @@ fun MainAppScaffold(viewModel: MadrasaViewModel) {
         currentTab = "dashboard"
     }
 
-    val students by viewModel.students.collectAsState()
-    val fees by viewModel.fees.collectAsState()
-    val results by viewModel.results.collectAsState()
-    val teachers by viewModel.teachers.collectAsState()
-    val teacherPayments by viewModel.teacherPayments.collectAsState()
-    val expenses by viewModel.expenses.collectAsState()
-    val notices by viewModel.notices.collectAsState()
-    val questionPapers by viewModel.questionPapers.collectAsState()
-    val classRoutines by viewModel.classRoutines.collectAsState()
-    val madrasaInfo by viewModel.madrasaInfo.collectAsState()
+    val students by viewModel.students.collectAsStateWithLifecycle()
+    val fees by viewModel.fees.collectAsStateWithLifecycle()
+    val results by viewModel.results.collectAsStateWithLifecycle()
+    val teachers by viewModel.teachers.collectAsStateWithLifecycle()
+    val teacherPayments by viewModel.teacherPayments.collectAsStateWithLifecycle()
+    val expenses by viewModel.expenses.collectAsStateWithLifecycle()
+    val notices by viewModel.notices.collectAsStateWithLifecycle()
+    val questionPapers by viewModel.questionPapers.collectAsStateWithLifecycle()
+    val classRoutines by viewModel.classRoutines.collectAsStateWithLifecycle()
+    val madrasaInfo by viewModel.madrasaInfo.collectAsStateWithLifecycle()
 
     val bottomTabs = remember {
         listOf(
@@ -252,8 +253,8 @@ fun MainAppScaffold(viewModel: MadrasaViewModel) {
                     )
                     "routine" -> ClassRoutineScreen(
                         routines = classRoutines,
-                        onAddRoutine = { cls, day, slot, sub, teacher ->
-                            viewModel.addClassRoutine(cls, day, slot, sub, teacher)
+                        onAddRoutine = { cls, day, slot, sub, teacher, dur ->
+                            viewModel.addClassRoutine(cls, day, slot, sub, teacher, dur)
                         },
                         onDeleteRoutine = { id -> viewModel.deleteClassRoutine(id) }
                     )

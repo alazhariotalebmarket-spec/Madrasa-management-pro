@@ -9,7 +9,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material3.*
@@ -30,6 +29,7 @@ import com.example.data.MadrasaInfo
 import com.example.data.entity.FeeEntity
 import com.example.data.entity.StudentEntity
 import com.example.ui.components.MadrasaEmptyState
+import com.example.ui.components.ThreeDotDeleteMenu
 import com.example.ui.components.madrasaCardBorder
 import com.example.ui.theme.MadrasaAccent
 import com.example.ui.theme.MadrasaContainer
@@ -109,6 +109,9 @@ fun FeesScreen(
     val feeTypes = listOf("মাসিক বেতন", "মাসিক বিদ্যুৎ বিল", "পরীক্ষার ফি", "ভর্তি ফি", "অন্যান্য")
     val months = listOf("জানুয়ারি", "ফেব্রুয়ারি", "মার্চ", "এপ্রিল", "মে", "জুন", "জুলাই", "আগস্ট", "সেপ্টেম্বর", "অক্টোবর", "নভেম্বর", "ডিসেম্বর")
 
+    val studentMap = remember(students) { students.associateBy { it.id } }
+    val sortedFees = remember(fees) { fees.sortedByDescending { it.id } }
+
     val reportFees = remember(fees, isYearlyReport, filterMonth, filterYear) {
         fees.filter { fee ->
             val matchYear = fee.date.endsWith(filterYear) || fee.month.contains(filterYear)
@@ -120,14 +123,18 @@ fun FeesScreen(
         }
     }
 
-    val totalSalaryCollected = reportFees.filter { it.type == "মাসিক বেতন" }.sumOf { it.amount }
-    val totalElectricCollected = reportFees.filter { it.type == "মাসিক বিদ্যুৎ বিল" }.sumOf { it.amount }
-    val totalExamCollected = reportFees.filter { it.type == "পরীক্ষার ফি" }.sumOf { it.amount }
-    val totalOtherCollected = reportFees.filter { it.type !in listOf("মাসিক বেতন", "মাসিক বিদ্যুৎ বিল", "পরীক্ষার ফি") }.sumOf { it.amount }
-    val totalCollected = reportFees.sumOf { it.amount }
+    val totalSalaryCollected = remember(reportFees) { reportFees.filter { it.type == "মাসিক বেতন" }.sumOf { it.amount } }
+    val totalElectricCollected = remember(reportFees) { reportFees.filter { it.type == "মাসিক বিদ্যুৎ বিল" }.sumOf { it.amount } }
+    val totalExamCollected = remember(reportFees) { reportFees.filter { it.type == "পরীক্ষার ফি" }.sumOf { it.amount } }
+    val totalOtherCollected = remember(reportFees) { reportFees.filter { it.type !in listOf("মাসিক বেতন", "মাসিক বিদ্যুৎ বিল", "পরীক্ষার ফি") }.sumOf { it.amount } }
+    val totalCollected = remember(reportFees) { reportFees.sumOf { it.amount } }
 
-    val expectedTuition = if (isYearlyReport) students.sumOf { it.fee * 12 } else students.sumOf { it.fee }
-    val expectedElectric = if (isYearlyReport) students.sumOf { it.electricBill * 12 } else students.sumOf { it.electricBill }
+    val expectedTuition = remember(students, isYearlyReport) {
+        if (isYearlyReport) students.sumOf { it.fee * 12 } else students.sumOf { it.fee }
+    }
+    val expectedElectric = remember(students, isYearlyReport) {
+        if (isYearlyReport) students.sumOf { it.electricBill * 12 } else students.sumOf { it.electricBill }
+    }
     val totalExpected = expectedTuition + expectedElectric
     val totalDue = maxOf(0.0, totalExpected - (totalSalaryCollected + totalElectricCollected))
 
@@ -467,8 +474,8 @@ fun FeesScreen(
                 )
             }
         } else {
-            items(fees.sortedByDescending { it.id }, key = { it.id }) { fee ->
-                val fStudent = students.find { it.id == fee.studentId }
+            items(sortedFees, key = { it.id }) { fee ->
+                val fStudent = studentMap[fee.studentId]
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(14.dp),
@@ -508,9 +515,9 @@ fun FeesScreen(
                             IconButton(onClick = { activeReceiptFee = fee }) {
                                 Icon(Icons.Default.PictureAsPdf, contentDescription = "রসিদ", tint = MadrasaPrimary, modifier = Modifier.size(20.dp))
                             }
-                            IconButton(onClick = { onDeleteFee(fee.id) }) {
-                                Icon(Icons.Default.Delete, contentDescription = "মুছুন", tint = MadrasaRed, modifier = Modifier.size(20.dp))
-                            }
+                            ThreeDotDeleteMenu(
+                                onDelete = { onDeleteFee(fee.id) }
+                            )
                         }
                     }
                 }
@@ -518,9 +525,8 @@ fun FeesScreen(
         }
     }
 
-    if (activeReceiptFee != null) {
-        val rFee = activeReceiptFee!!
-        val rStudent = students.find { it.id == rFee.studentId }
+    activeReceiptFee?.let { rFee ->
+        val rStudent = studentMap[rFee.studentId]
         AlertDialog(
             onDismissRequest = { activeReceiptFee = null },
             confirmButton = {

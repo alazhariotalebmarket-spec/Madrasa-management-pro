@@ -9,7 +9,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material3.*
@@ -25,6 +24,7 @@ import androidx.compose.ui.unit.sp
 import com.example.data.entity.ExpenseEntity
 import com.example.data.entity.FeeEntity
 import com.example.ui.components.MadrasaEmptyState
+import com.example.ui.components.ThreeDotDeleteMenu
 import com.example.ui.components.madrasaCardBorder
 import com.example.ui.theme.MadrasaGreen
 import com.example.ui.theme.MadrasaPrimary
@@ -509,10 +509,10 @@ fun ExpensesScreen(
                                 fontSize = 15.5.sp,
                                 color = if (selectedTab == "খরচ") MadrasaPrimary else MadrasaRed
                             )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            IconButton(onClick = { onDeleteExpense(exp.id) }) {
-                                Icon(Icons.Default.Delete, contentDescription = "মুছুন", tint = MadrasaRed, modifier = Modifier.size(20.dp))
-                            }
+                            Spacer(modifier = Modifier.width(4.dp))
+                            ThreeDotDeleteMenu(
+                                onDelete = { onDeleteExpense(exp.id) }
+                            )
                         }
                     }
                 }

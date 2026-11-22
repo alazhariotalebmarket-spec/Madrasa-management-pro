@@ -35,6 +35,7 @@ import android.media.ExifInterface
 import com.example.ui.theme.MadrasaAccent
 import com.example.ui.theme.MadrasaPrimary
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
@@ -48,8 +49,10 @@ fun ImageCropperDialog(
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var loadedBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var isLoading by remember { mutableStateOf(true) }
+    var isSaving by remember { mutableStateOf(false) }
 
     var rotationAngle by remember { mutableStateOf(0) } // 0, 90, 180, 270
     var isCircular by remember { mutableStateOf(false) } // false = square, true = circle
@@ -141,7 +144,8 @@ fun ImageCropperDialog(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                if (isLoading || loadedBitmap == null) {
+                val bmp = loadedBitmap
+                if (isLoading || bmp == null) {
                     Box(
                         modifier = Modifier
                             .size(260.dp)
@@ -151,7 +155,6 @@ fun ImageCropperDialog(
                         CircularProgressIndicator(color = MadrasaPrimary)
                     }
                 } else {
-                    val bmp = loadedBitmap!!
                     val composeImage = remember(bmp, rotationAngle) {
                         if (rotationAngle != 0) {
                             val matrix = Matrix().apply { postRotate(rotationAngle.toFloat()) }
@@ -303,7 +306,8 @@ fun ImageCropperDialog(
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     OutlinedButton(
-                        onClick = onDismiss,
+                        onClick = { if (!isSaving) onDismiss() },
+                        enabled = !isSaving,
                         modifier = Modifier.weight(1f),
                         shape = RoundedCornerShape(8.dp),
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.LightGray)
@@ -313,29 +317,44 @@ fun ImageCropperDialog(
 
                     Button(
                         onClick = {
-                            val bmp = loadedBitmap
-                            if (bmp != null) {
-                                val savedPath = saveCroppedBitmap(
-                                    context = context,
-                                    src = bmp,
-                                    rotation = rotationAngle,
-                                    zoom = zoomScale,
-                                    pan = panOffset,
-                                    isCircle = isCircular
-                                )
-                                if (savedPath != null) {
-                                    Toast.makeText(context, "ছবি সফলভাবে ক্রপ ও সেভ হয়েছে!", Toast.LENGTH_SHORT).show()
-                                    onCropCompleted(savedPath)
-                                } else {
-                                    Toast.makeText(context, "ছবি সেভ করতে সমস্যা হয়েছে", Toast.LENGTH_SHORT).show()
+                            val currentBmp = loadedBitmap
+                            if (currentBmp != null && !isSaving) {
+                                isSaving = true
+                                scope.launch {
+                                    val savedPath = withContext(Dispatchers.IO) {
+                                        saveCroppedBitmap(
+                                            context = context,
+                                            src = currentBmp,
+                                            rotation = rotationAngle,
+                                            zoom = zoomScale,
+                                            pan = panOffset,
+                                            isCircle = isCircular
+                                        )
+                                    }
+                                    isSaving = false
+                                    if (savedPath != null) {
+                                        Toast.makeText(context, "ছবি সফলভাবে ক্রপ ও সেভ হয়েছে!", Toast.LENGTH_SHORT).show()
+                                        onCropCompleted(savedPath)
+                                    } else {
+                                        Toast.makeText(context, "ছবি সেভ করতে সমস্যা হয়েছে", Toast.LENGTH_SHORT).show()
+                                    }
                                 }
                             }
                         },
+                        enabled = !isSaving && loadedBitmap != null,
                         modifier = Modifier.weight(1.4f),
                         shape = RoundedCornerShape(8.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = MadrasaPrimary)
                     ) {
-                        Text("💾 ক্রপ ও সেভ", fontWeight = FontWeight.Bold, color = Color.White)
+                        if (isSaving) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                color = Color.White,
+                                strokeWidth = 2.dp
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                        }
+                        Text(if (isSaving) "সেভ হচ্ছে..." else "💾 ক্রপ ও সেভ", fontWeight = FontWeight.Bold, color = Color.White)
                     }
                 }
             }

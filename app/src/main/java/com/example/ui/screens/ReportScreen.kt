@@ -24,6 +24,7 @@ import com.example.data.entity.FeeEntity
 import com.example.data.entity.StudentEntity
 import com.example.ui.components.MadrasaEmptyState
 import com.example.ui.components.madrasaCardBorder
+import com.example.ui.components.safeStartActivity
 import com.example.ui.theme.MadrasaGreen
 import com.example.ui.theme.MadrasaPrimary
 import com.example.ui.theme.MadrasaRed
@@ -42,6 +43,10 @@ fun ReportScreen(
 
     val classesList = remember(students) {
         listOf("সকল শ্রেণী") + students.map { it.cls }.distinct().filter { it.isNotBlank() }
+    }
+
+    val paidByStudentId = remember(fees) {
+        fees.groupBy { it.studentId }.mapValues { (_, list) -> list.sumOf { it.amount } }
     }
 
     val filteredStudents = remember(students, selectedClassFilter) {
@@ -123,7 +128,7 @@ fun ReportScreen(
             }
         } else {
             items(filteredStudents, key = { it.id }) { student ->
-                val paidTotal = fees.filter { it.studentId == student.id }.sumOf { it.amount }
+                val paidTotal = paidByStudentId[student.id] ?: 0.0
                 val due = maxOf(0.0, student.fee - paidTotal)
                 val isDue = due > 0
                 val rollStr = if (student.roll.isNotBlank()) "রোল: ${student.roll}" else "রোল: -"
@@ -176,7 +181,7 @@ fun ReportScreen(
                                 OutlinedButton(
                                     onClick = {
                                         val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:${student.phone}"))
-                                        context.startActivity(intent)
+                                        safeStartActivity(context, intent, "কল করার অ্যাপ পাওয়া যায়নি")
                                     },
                                     modifier = Modifier.heightIn(min = 40.dp),
                                     shape = RoundedCornerShape(10.dp)
@@ -194,7 +199,7 @@ fun ReportScreen(
                                         val intent = Intent(Intent.ACTION_VIEW, Uri.parse("smsto:${student.phone}")).apply {
                                             putExtra("sms_body", message)
                                         }
-                                        context.startActivity(intent)
+                                        safeStartActivity(context, intent, "মেসেজ পাঠানোর অ্যাপ পাওয়া যায়নি")
                                     },
                                     modifier = Modifier.heightIn(min = 40.dp),
                                     colors = ButtonDefaults.buttonColors(containerColor = MadrasaPrimary, contentColor = Color.White),

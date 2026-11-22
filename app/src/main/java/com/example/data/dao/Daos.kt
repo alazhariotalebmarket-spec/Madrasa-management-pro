@@ -15,6 +15,9 @@ interface StudentDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertStudent(student: StudentEntity): Long
 
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAllStudents(students: List<StudentEntity>)
+
     @Query("DELETE FROM students WHERE id = :id")
     suspend fun deleteStudent(id: Int)
 }
@@ -27,6 +30,9 @@ interface FeeDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertFee(fee: FeeEntity): Long
 
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAllFees(fees: List<FeeEntity>)
+
     @Query("DELETE FROM fees WHERE id = :id")
     suspend fun deleteFee(id: Int)
 }
@@ -38,6 +44,9 @@ interface AttendanceDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAttendance(attendance: AttendanceEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAllAttendance(items: List<AttendanceEntity>)
 }
 
 @Dao
@@ -47,6 +56,9 @@ interface ResultDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertResult(result: ResultEntity): Long
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAllResults(results: List<ResultEntity>)
 
     @Query("DELETE FROM results WHERE id = :id")
     suspend fun deleteResult(id: Int)
@@ -59,6 +71,9 @@ interface TeacherDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertTeacher(teacher: TeacherEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAllTeachers(teachers: List<TeacherEntity>)
 
     @Query("DELETE FROM teachers WHERE id = :id")
     suspend fun deleteTeacher(id: Int)
@@ -75,6 +90,9 @@ interface TeacherPaymentDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertTeacherPayment(payment: TeacherPaymentEntity): Long
 
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAllTeacherPayments(payments: List<TeacherPaymentEntity>)
+
     @Query("DELETE FROM teacher_payments WHERE id = :id")
     suspend fun deleteTeacherPayment(id: Int)
 }
@@ -87,6 +105,9 @@ interface ExpenseDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertExpense(expense: ExpenseEntity)
 
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAllExpenses(expenses: List<ExpenseEntity>)
+
     @Query("DELETE FROM expenses WHERE id = :id")
     suspend fun deleteExpense(id: Int)
 }
@@ -98,6 +119,9 @@ interface NoticeDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertNotice(notice: NoticeEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAllNotices(notices: List<NoticeEntity>)
 
     @Query("DELETE FROM notices WHERE id = :id")
     suspend fun deleteNotice(id: Int)

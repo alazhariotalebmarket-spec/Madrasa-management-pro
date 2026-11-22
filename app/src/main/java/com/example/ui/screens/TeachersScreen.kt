@@ -29,10 +29,10 @@ import com.example.data.entity.TeacherEntity
 import com.example.data.entity.TeacherPaymentEntity
 import com.example.ui.components.ImageCropperDialog
 import com.example.ui.components.MadrasaEmptyState
+import com.example.ui.components.ThreeDotDeleteMenu
 import com.example.ui.components.madrasaCardBorder
-import com.example.ui.theme.MadrasaAccent
+import com.example.ui.components.safeStartActivity
 import com.example.ui.theme.MadrasaPrimary
-import com.example.ui.theme.MadrasaRed
 import com.example.util.PdfPrintUtil
 import java.text.SimpleDateFormat
 import java.util.*
@@ -71,9 +71,15 @@ fun TeachersScreen(
         }
     }
 
-    if (rawPhotoUri != null) {
+    val paymentsByTeacher = remember(teacherPayments) {
+        teacherPayments.groupBy { it.teacherId }
+    }
+    val currentYear = remember { SimpleDateFormat("yyyy", Locale.getDefault()).format(Date()) }
+    val currentMonth = "জানুয়ারি"
+
+    rawPhotoUri?.let { selectedUri ->
         ImageCropperDialog(
-            imageUri = rawPhotoUri!!,
+            imageUri = selectedUri,
             onCropCompleted = { croppedPath ->
                 photoUri = croppedPath
                 rawPhotoUri = null
@@ -294,10 +300,8 @@ fun TeachersScreen(
                 )
             }
         } else {
-            items(teachers) { teacher ->
-                val payments = teacherPayments.filter { it.teacherId == teacher.id }
-                val currentYear = SimpleDateFormat("yyyy", Locale.getDefault()).format(Date())
-                val currentMonth = "জানুয়ারি"
+            items(teachers, key = { it.id }) { teacher ->
+                val payments = paymentsByTeacher[teacher.id].orEmpty()
 
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -346,11 +350,11 @@ fun TeachersScreen(
                                 }
                             }
 
-                            Column(horizontalAlignment = Alignment.End) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
                                 if (teacher.phone.isNotBlank()) {
                                     IconButton(onClick = {
                                         val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:${teacher.phone}"))
-                                        context.startActivity(intent)
+                                        safeStartActivity(context, intent, "কল করার অ্যাপ পাওয়া যায়নি")
                                     }) {
                                         Icon(Icons.Default.Call, contentDescription = "Call", tint = MaterialTheme.colorScheme.primary)
                                     }
@@ -367,9 +371,9 @@ fun TeachersScreen(
                                 }) {
                                     Icon(Icons.Default.Edit, contentDescription = "Edit", tint = MaterialTheme.colorScheme.primary)
                                 }
-                                IconButton(onClick = { onDeleteTeacher(teacher.id) }) {
-                                    Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MadrasaRed)
-                                }
+                                ThreeDotDeleteMenu(
+                                    onDelete = { onDeleteTeacher(teacher.id) }
+                                )
                             }
                         }
 
@@ -434,9 +438,8 @@ fun TeachersScreen(
     }
 
     // Salary Payment Dialog
-    if (payingTeacher != null) {
-        val t = payingTeacher!!
-        var payAmountStr by remember { mutableStateOf(t.salary.toInt().toString()) }
+    payingTeacher?.let { t ->
+        var payAmountStr by remember(t.id) { mutableStateOf(t.salary.toInt().toString()) }
         var payMonth by remember { mutableStateOf("জানুয়ারি") }
         var payYear by remember { mutableStateOf(SimpleDateFormat("yyyy", Locale.getDefault()).format(Date())) }
         var payNote by remember { mutableStateOf("") }

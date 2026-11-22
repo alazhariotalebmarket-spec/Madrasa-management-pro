@@ -29,6 +29,12 @@ import com.example.ui.theme.MadrasaGreen
 import com.example.ui.theme.MadrasaPrimary
 import com.example.ui.theme.MadrasaRed
 import com.example.ui.theme.MadrasaSapphire
+import com.example.util.CombinedResultHelper
+import com.example.util.EXAM_ANNUAL
+import com.example.util.EXAM_COMBINED_THREE
+import com.example.util.EXAM_FIRST_TERM
+import com.example.util.EXAM_MONTHLY
+import com.example.util.EXAM_SECOND_TERM
 import com.example.util.MeritPdfEntry
 import com.example.util.PdfPrintUtil
 
@@ -40,8 +46,14 @@ fun MeritListScreen(
     gradeCalculator: (Double) -> String
 ) {
     val context = LocalContext.current
-    val examOptions = listOf("১ম সাময়িক", "২য় সাময়িক", "বার্ষিক পরীক্ষা", "মাসিক পরীক্ষা")
-    var selectedExam by remember { mutableStateOf("১ম সাময়িক") }
+    val examOptions = listOf(
+        EXAM_FIRST_TERM,
+        EXAM_SECOND_TERM,
+        EXAM_ANNUAL,
+        EXAM_COMBINED_THREE,
+        EXAM_MONTHLY
+    )
+    var selectedExam by remember { mutableStateOf(EXAM_FIRST_TERM) }
     var expandedExam by remember { mutableStateOf(false) }
 
     val classOptions = remember(students) {
@@ -50,33 +62,67 @@ fun MeritListScreen(
     var selectedClass by remember { mutableStateOf("সকল শ্রেণী") }
     var expandedClass by remember { mutableStateOf(false) }
 
-    val rankedList = remember(students, results, selectedExam, selectedClass) {
-        val matchingResults = results.filter { res ->
-            val st = students.find { it.id == res.studentId }
-            val examMatches = res.exam == selectedExam
-            val classMatches = selectedClass == "সকল শ্রেণী" || st?.cls == selectedClass
-            examMatches && classMatches && st != null
-        }.sortedWith(
-            compareByDescending<ResultEntity> { it.isAllPassed(33.0) }
-                .thenByDescending { it.total }
-                .thenByDescending { it.avg }
-        )
+    val studentMap = remember(students) { students.associateBy { it.id } }
 
-        matchingResults.mapIndexed { index, res ->
-            val st = students.find { it.id == res.studentId }!!
-            val passed = res.isAllPassed(33.0)
-            val maxMarks = (res.getSubjectList().size * 100).coerceAtLeast(100)
-            MeritPdfEntry(
-                rankLabel = calculateRankBengali(index + 1),
-                roll = st.roll,
-                name = st.name,
-                cls = st.cls,
-                totalMarks = res.total,
-                maxMarks = maxMarks,
-                avg = res.avg,
-                grade = if (passed) gradeCalculator(res.avg) else "F",
-                passed = passed
+    val rankedList = remember(students, results, selectedExam, selectedClass) {
+        if (selectedExam == EXAM_COMBINED_THREE) {
+            val resultsByStudent = results.groupBy { it.studentId }
+            val combinedEntries = students.filter { st ->
+                selectedClass == "সকল শ্রেণী" || st.cls == selectedClass
+            }.mapNotNull { st ->
+                val stResults = resultsByStudent[st.id].orEmpty()
+                val combined = CombinedResultHelper.computeForStudent(st.id, stResults) ?: return@mapNotNull null
+                st to combined
+            }.sortedWith(
+                compareByDescending<Pair<StudentEntity, com.example.util.CombinedStudentResult>> { it.second.isOverallPass }
+                    .thenByDescending { it.second.grandTotal }
+                    .thenByDescending { it.second.overallAvg }
             )
+
+            combinedEntries.mapIndexed { index, (st, combined) ->
+                MeritPdfEntry(
+                    rankLabel = calculateRankBengali(index + 1),
+                    roll = st.roll,
+                    name = st.name,
+                    cls = "${st.cls} (${combined.examCount}/৩ পরীক্ষা)",
+                    totalMarks = combined.grandTotal,
+                    maxMarks = combined.maxPossible,
+                    avg = combined.overallAvg,
+                    grade = if (combined.isOverallPass) gradeCalculator(combined.overallAvg) else "F",
+                    passed = combined.isOverallPass
+                )
+            }
+        } else {
+            val matchingResults = results.filter { res ->
+                val st = studentMap[res.studentId]
+                val examMatches = when (selectedExam) {
+                    EXAM_SECOND_TERM -> CombinedResultHelper.isSecondTerm(res.exam)
+                    else -> res.exam == selectedExam
+                }
+                val classMatches = selectedClass == "সকল শ্রেণী" || st?.cls == selectedClass
+                examMatches && classMatches && st != null
+            }.sortedWith(
+                compareByDescending<ResultEntity> { it.isAllPassed(33.0) }
+                    .thenByDescending { it.total }
+                    .thenByDescending { it.avg }
+            )
+
+            matchingResults.mapIndexedNotNull { index, res ->
+                val st = studentMap[res.studentId] ?: return@mapIndexedNotNull null
+                val passed = res.isAllPassed(33.0)
+                val maxMarks = (res.getSubjectList().size * 100).coerceAtLeast(100)
+                MeritPdfEntry(
+                    rankLabel = calculateRankBengali(index + 1),
+                    roll = st.roll,
+                    name = st.name,
+                    cls = st.cls,
+                    totalMarks = res.total,
+                    maxMarks = maxMarks,
+                    avg = res.avg,
+                    grade = if (passed) gradeCalculator(res.avg) else "F",
+                    passed = passed
+                )
+            }
         }
     }
 
@@ -202,7 +248,10 @@ fun MeritListScreen(
                 )
             }
         } else {
-            itemsIndexed(rankedList) { index, entry ->
+            itemsIndexed(
+                items = rankedList,
+                key = { index, entry -> "${index}_${entry.name}_${entry.cls}_${entry.roll}" }
+            ) { index, entry ->
                 val rankBg = when (index) {
                     0 -> MadrasaGold
                     1 -> Color(0xFF64748B)

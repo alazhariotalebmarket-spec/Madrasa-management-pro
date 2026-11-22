@@ -31,10 +31,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -72,7 +71,7 @@ fun MadrasaSplashOverlay(
 
     LaunchedEffect(Unit) {
         launch {
-            emblemAlpha.animateTo(1f, animationSpec = tween(durationMillis = 480))
+            emblemAlpha.animateTo(1f, animationSpec = tween(durationMillis = 420))
         }
         launch {
             emblemScale.animateTo(
@@ -83,9 +82,9 @@ fun MadrasaSplashOverlay(
                 )
             )
         }
-        delay(280)
-        textAlpha.animateTo(1f, animationSpec = tween(durationMillis = 480))
-        delay(1300)
+        delay(240)
+        textAlpha.animateTo(1f, animationSpec = tween(durationMillis = 420))
+        delay(1150)
         onFinished()
     }
 
@@ -112,8 +111,12 @@ fun MadrasaSplashOverlay(
                     border = BorderStroke(1.5.dp, MadrasaGold.copy(alpha = 0.45f)),
                     modifier = Modifier
                         .size(196.dp)
-                        .scale(emblemScale.value * ringScale)
-                        .alpha(emblemAlpha.value)
+                        .graphicsLayer {
+                            val combinedScale = emblemScale.value * ringScale
+                            scaleX = combinedScale
+                            scaleY = combinedScale
+                            alpha = emblemAlpha.value
+                        }
                 ) {}
 
                 Surface(
@@ -123,8 +126,11 @@ fun MadrasaSplashOverlay(
                     shadowElevation = 14.dp,
                     modifier = Modifier
                         .size(164.dp)
-                        .scale(emblemScale.value)
-                        .alpha(emblemAlpha.value)
+                        .graphicsLayer {
+                            scaleX = emblemScale.value
+                            scaleY = emblemScale.value
+                            alpha = emblemAlpha.value
+                        }
                 ) {
                     Image(
                         painter = painterResource(id = R.drawable.splash_ishaqia_emblem),
@@ -140,7 +146,7 @@ fun MadrasaSplashOverlay(
             Spacer(modifier = Modifier.height(26.dp))
 
             Column(
-                modifier = Modifier.alpha(textAlpha.value),
+                modifier = Modifier.graphicsLayer { alpha = textAlpha.value },
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(

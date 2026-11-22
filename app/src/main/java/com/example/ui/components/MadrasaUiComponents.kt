@@ -1,7 +1,10 @@
 package com.example.ui.components
 
+import android.app.Activity
+import android.content.Context
+import android.content.Intent
+import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -9,11 +12,14 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -31,6 +37,7 @@ import androidx.compose.ui.unit.sp
 import com.example.R
 import com.example.ui.theme.MadrasaGold
 import com.example.ui.theme.MadrasaPrimaryDark
+import com.example.ui.theme.MadrasaRed
 import com.example.ui.theme.MadrasaSky
 import com.example.ui.theme.MadrasaTeal
 import kotlin.math.cos
@@ -50,39 +57,114 @@ fun madrasaCardBorder(): BorderStroke =
     BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.65f))
 
 @Composable
-fun IslamicPatternOverlay(modifier: Modifier = Modifier) {
-    Canvas(modifier = modifier) {
-        val patternColor = Color.White.copy(alpha = 0.08f)
-        val dotTint = MadrasaSky.copy(alpha = 0.12f)
-        val goldTint = MadrasaGold.copy(alpha = 0.09f)
-        val step = 54.dp.toPx()
-        val cols = (size.width / step).toInt() + 2
-        val rows = (size.height / step).toInt() + 2
-
-        for (r in 0..rows) {
-            for (c in 0..cols) {
-                val cx = c * step + if (r % 2 == 0) 0f else step / 2f
-                val cy = r * step
-                val radius = step * 0.34f
-                val innerR = radius * 0.48f
-                val starPath = Path()
-                for (i in 0 until 16) {
-                    val angle = Math.toRadians(i * 22.5)
-                    val rad = if (i % 2 == 0) radius else innerR
-                    val px = cx + (rad * cos(angle)).toFloat()
-                    val py = cy + (rad * sin(angle)).toFloat()
-                    if (i == 0) starPath.moveTo(px, py) else starPath.lineTo(px, py)
+fun ThreeDotDeleteMenu(
+    onDelete: () -> Unit,
+    modifier: Modifier = Modifier,
+    deleteLabel: String = "ডিলেট করুন",
+    menuTestTag: String? = null
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box(modifier = modifier) {
+        IconButton(
+            onClick = { expanded = true },
+            modifier = Modifier
+                .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
+                .let { base -> if (menuTestTag != null) base.testTag(menuTestTag) else base }
+        ) {
+            Icon(
+                imageVector = Icons.Default.MoreVert,
+                contentDescription = "আরো অপশন",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false }
+        ) {
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        text = deleteLabel,
+                        color = MadrasaRed,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Default.Delete,
+                        contentDescription = null,
+                        tint = MadrasaRed
+                    )
+                },
+                onClick = {
+                    expanded = false
+                    onDelete()
                 }
-                starPath.close()
-                drawPath(starPath, color = patternColor, style = Stroke(width = 1.15f))
-                drawCircle(
-                    color = if ((r + c) % 2 == 0) dotTint else goldTint,
-                    radius = 2.dp.toPx(),
-                    center = Offset(cx, cy)
-                )
-            }
+            )
         }
     }
+}
+
+fun safeStartActivity(
+    context: Context,
+    intent: Intent,
+    fallbackMessage: String = "এই কাজটি করার জন্য উপযুক্ত অ্যাপ পাওয়া যায়নি"
+) {
+    try {
+        if (context !is Activity) {
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(intent)
+    } catch (_: Exception) {
+        Toast.makeText(context, fallbackMessage, Toast.LENGTH_SHORT).show()
+    }
+}
+
+@Composable
+fun IslamicPatternOverlay(modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier.drawWithCache {
+            val patternColor = Color.White.copy(alpha = 0.08f)
+            val dotTint = MadrasaSky.copy(alpha = 0.12f)
+            val goldTint = MadrasaGold.copy(alpha = 0.09f)
+            val step = 54.dp.toPx()
+            val cols = (size.width / step).toInt() + 2
+            val rows = (size.height / step).toInt() + 2
+            val combinedPath = Path()
+            val evenDots = mutableListOf<Offset>()
+            val oddDots = mutableListOf<Offset>()
+            val radius = step * 0.34f
+            val innerR = radius * 0.48f
+            val dotRadius = 2.dp.toPx()
+
+            for (r in 0..rows) {
+                for (c in 0..cols) {
+                    val cx = c * step + if (r % 2 == 0) 0f else step / 2f
+                    val cy = r * step
+                    for (i in 0 until 16) {
+                        val angle = Math.toRadians(i * 22.5)
+                        val rad = if (i % 2 == 0) radius else innerR
+                        val px = cx + (rad * cos(angle)).toFloat()
+                        val py = cy + (rad * sin(angle)).toFloat()
+                        if (i == 0) combinedPath.moveTo(px, py) else combinedPath.lineTo(px, py)
+                    }
+                    combinedPath.close()
+                    if ((r + c) % 2 == 0) evenDots.add(Offset(cx, cy)) else oddDots.add(Offset(cx, cy))
+                }
+            }
+            val strokeStyle = Stroke(width = 1.15f)
+
+            onDrawBehind {
+                drawPath(combinedPath, color = patternColor, style = strokeStyle)
+                evenDots.forEach { center ->
+                    drawCircle(color = dotTint, radius = dotRadius, center = center)
+                }
+                oddDots.forEach { center ->
+                    drawCircle(color = goldTint, radius = dotRadius, center = center)
+                }
+            }
+        }
+    )
 }
 
 @Composable

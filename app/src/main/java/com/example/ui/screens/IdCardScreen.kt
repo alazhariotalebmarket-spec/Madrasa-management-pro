@@ -349,17 +349,17 @@ fun IdCardScreen(
         }
     }
 
-    if (previewStudent != null) {
+    previewStudent?.let { st ->
         StudentIdCardDialog(
-            student = previewStudent!!,
+            student = st,
             madrasaInfo = madrasaInfo,
             onDismiss = { previewStudent = null }
         )
     }
 
-    if (previewTeacher != null) {
+    previewTeacher?.let { t ->
         TeacherIdCardDialog(
-            teacher = previewTeacher!!,
+            teacher = t,
             madrasaInfo = madrasaInfo,
             onDismiss = { previewTeacher = null }
         )

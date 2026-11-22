@@ -13,7 +13,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Crop
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.*
@@ -35,11 +34,11 @@ import com.example.data.MadrasaInfo
 import com.example.data.entity.StudentEntity
 import com.example.ui.components.ImageCropperDialog
 import com.example.ui.components.MadrasaEmptyState
+import com.example.ui.components.ThreeDotDeleteMenu
 import com.example.ui.components.madrasaCardBorder
 import com.example.ui.theme.MadrasaContainer
 import com.example.ui.theme.MadrasaGold
 import com.example.ui.theme.MadrasaPrimary
-import com.example.ui.theme.MadrasaRed
 import com.example.ui.theme.MadrasaSapphire
 import com.example.ui.theme.TextDark
 
@@ -87,9 +86,9 @@ fun StudentsScreen(
         }
     }
 
-    if (rawSelectedPhotoUri != null) {
+    rawSelectedPhotoUri?.let { selectedUri ->
         ImageCropperDialog(
-            imageUri = rawSelectedPhotoUri!!,
+            imageUri = selectedUri,
             onCropCompleted = { croppedPath ->
                 photoUri = croppedPath
                 rawSelectedPhotoUri = null
@@ -100,10 +99,13 @@ fun StudentsScreen(
         )
     }
 
-    val filteredStudents = students.filter {
-        it.name.contains(searchQuery, ignoreCase = true) ||
+    val filteredStudents = remember(students, searchQuery) {
+        if (searchQuery.isBlank()) students
+        else students.filter {
+            it.name.contains(searchQuery, ignoreCase = true) ||
                 it.cls.contains(searchQuery, ignoreCase = true) ||
                 it.roll.contains(searchQuery, ignoreCase = true)
+        }
     }
 
     LazyColumn(
@@ -402,7 +404,7 @@ fun StudentsScreen(
                 )
             }
         } else {
-            items(filteredStudents) { student ->
+            items(filteredStudents, key = { it.id }) { student ->
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(14.dp),
@@ -476,9 +478,9 @@ fun StudentsScreen(
                             }) {
                                 Icon(Icons.Default.Edit, contentDescription = "Edit", tint = MaterialTheme.colorScheme.primary)
                             }
-                            IconButton(onClick = { onDeleteStudent(student.id) }) {
-                                Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MadrasaRed)
-                            }
+                            ThreeDotDeleteMenu(
+                                onDelete = { onDeleteStudent(student.id) }
+                            )
                         }
                     }
                 }
@@ -486,9 +488,9 @@ fun StudentsScreen(
         }
     }
 
-    if (selectedStudentForIdCard != null) {
+    selectedStudentForIdCard?.let { idStudent ->
         StudentIdCardDialog(
-            student = selectedStudentForIdCard!!,
+            student = idStudent,
             madrasaInfo = madrasaInfo,
             onDismiss = { selectedStudentForIdCard = null }
         )

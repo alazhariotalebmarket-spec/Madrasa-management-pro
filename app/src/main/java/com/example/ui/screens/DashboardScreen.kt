@@ -2,7 +2,10 @@ package com.example.ui.screens
 
 import android.content.Context
 import android.content.Intent
+import android.os.Handler
+import android.os.Looper
 import android.widget.Toast
+import java.util.concurrent.Executors
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -455,44 +458,70 @@ fun DashboardScreen(
     }
 }
 
+private val apkExportExecutor = Executors.newSingleThreadExecutor()
+private val apkMainHandler = Handler(Looper.getMainLooper())
+
 fun downloadApkDirectly(context: Context) {
-    try {
-        val sourceApk = File(context.applicationInfo.sourceDir)
-        val cachedApk = File(context.cacheDir, "Madrasa_Management_Pro.apk")
-        FileInputStream(sourceApk).use { input ->
-            FileOutputStream(cachedApk).use { output ->
-                input.copyTo(output)
+    val appContext = context.applicationContext
+    Toast.makeText(appContext, "APK ফাইল প্রস্তুত হচ্ছে...", Toast.LENGTH_SHORT).show()
+    apkExportExecutor.execute {
+        try {
+            val sourceApk = File(appContext.applicationInfo.sourceDir)
+            val cachedApk = File(appContext.cacheDir, "Madrasa_Management_Pro.apk")
+            FileInputStream(sourceApk).use { input ->
+                FileOutputStream(cachedApk).use { output ->
+                    input.copyTo(output)
+                }
+            }
+
+            val savedUri = PdfPrintUtil.saveFileToDownloads(
+                context = appContext,
+                sourceFile = cachedApk,
+                displayName = "Madrasa_Management_Pro.apk",
+                mimeType = "application/vnd.android.package-archive"
+            )
+
+            val shareUri = FileProvider.getUriForFile(
+                appContext,
+                "${appContext.packageName}.fileprovider",
+                cachedApk
+            )
+
+            val toastText = if (savedUri != null) {
+                "APK ফাইল সফলভাবে Downloads/MadrasaPro ফোল্ডারে সেভ হয়েছে!"
+            } else {
+                "APK ফাইল প্রস্তুত হয়েছে!"
+            }
+
+            val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                type = "application/vnd.android.package-archive"
+                putExtra(Intent.EXTRA_STREAM, shareUri)
+                putExtra(Intent.EXTRA_SUBJECT, "মাদ্রাসা ম্যানেজমেন্ট প্রো (APK)")
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+
+            apkMainHandler.post {
+                Toast.makeText(appContext, toastText, Toast.LENGTH_LONG).show()
+                try {
+                    val chooser = Intent.createChooser(shareIntent, "APK ফাইল ওপেন বা ইনস্টল করুন").apply {
+                        if (context !is android.app.Activity) {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                    }
+                    context.startActivity(chooser)
+                } catch (_: Exception) {
+                    try {
+                        val chooser = Intent.createChooser(shareIntent, "APK ফাইল ওপেন বা ইনস্টল করুন")
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        appContext.startActivity(chooser)
+                    } catch (_: Exception) {
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            apkMainHandler.post {
+                Toast.makeText(appContext, "APK ডাউনলোডে ত্রুটি: ${e.message}", Toast.LENGTH_SHORT).show()
             }
         }
-
-        val savedUri = PdfPrintUtil.saveFileToDownloads(
-            context = context,
-            sourceFile = cachedApk,
-            displayName = "Madrasa_Management_Pro.apk",
-            mimeType = "application/vnd.android.package-archive"
-        )
-
-        val shareUri = FileProvider.getUriForFile(
-            context,
-            "${context.packageName}.fileprovider",
-            cachedApk
-        )
-
-        val toastText = if (savedUri != null) {
-            "APK ফাইল সফলভাবে Downloads/MadrasaPro ফোল্ডারে সেভ হয়েছে!"
-        } else {
-            "APK ফাইল প্রস্তুত হয়েছে!"
-        }
-        Toast.makeText(context, toastText, Toast.LENGTH_LONG).show()
-
-        val shareIntent = Intent(Intent.ACTION_SEND).apply {
-            type = "application/vnd.android.package-archive"
-            putExtra(Intent.EXTRA_STREAM, shareUri)
-            putExtra(Intent.EXTRA_SUBJECT, "মাদ্রাসা ম্যানেজমেন্ট প্রো (APK)")
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
-        context.startActivity(Intent.createChooser(shareIntent, "APK ফাইল ওপেন বা ইনস্টল করুন"))
-    } catch (e: Exception) {
-        Toast.makeText(context, "APK ডাউনলোডে ত্রুটি: ${e.message}", Toast.LENGTH_SHORT).show()
     }
 }
