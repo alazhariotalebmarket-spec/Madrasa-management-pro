@@ -41,6 +41,7 @@ import androidx.credentials.CredentialManager
 import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialCancellationException
+import com.example.BuildConfig
 import com.example.R
 import com.example.ui.components.IslamicPatternOverlay
 import com.example.ui.components.MadrasaHeaderGradient
@@ -273,6 +274,17 @@ private tailrec fun Context.findActivity(): Activity? = when (this) {
     else -> null
 }
 
+internal fun resolveWebClientId(context: Context): String {
+    val fromBuildConfig = BuildConfig.GOOGLE_WEB_CLIENT_ID.trim()
+    if (fromBuildConfig.isNotBlank()) return fromBuildConfig
+
+    return try {
+        context.getString(R.string.google_web_client_id_fallback).trim()
+    } catch (_: Exception) {
+        ""
+    }
+}
+
 fun attemptAutoSignIn(
     context: Context,
     credentialManager: CredentialManager,
@@ -284,9 +296,8 @@ fun attemptAutoSignIn(
         onAuthSuccess()
         return
     }
-    val clientId = try {
-        context.getString(R.string.default_web_client_id)
-    } catch (_: Exception) {
+    val clientId = resolveWebClientId(context)
+    if (clientId.isBlank()) {
         onUnauthenticated()
         return
     }
@@ -323,10 +334,9 @@ fun onGoogleSignInClicked(
     scope: CoroutineScope,
     onAuthCancelled: () -> Unit = {}
 ) {
-    val clientId = try {
-        context.getString(R.string.default_web_client_id)
-    } catch (_: Exception) {
-        onAuthError("Google Sign-In কনফিগারেশন পাওয়া যায়নি (default_web_client_id)")
+    val clientId = resolveWebClientId(context)
+    if (clientId.isBlank()) {
+        onAuthError("Google Sign-In কনফিগারেশন পাওয়া যায়নি (Web Client ID)")
         return
     }
     val activity = context.findActivity()

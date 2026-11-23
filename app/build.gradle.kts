@@ -8,6 +8,46 @@ plugins {
   alias(libs.plugins.google.services)
 }
 
+val googleServicesWebClientId: String = run {
+  val envOverride = System.getenv("GOOGLE_WEB_CLIENT_ID")?.trim().orEmpty()
+  if (envOverride.isNotEmpty()) return@run envOverride
+
+  val gsFile = file("google-services.json")
+  if (!gsFile.exists()) return@run ""
+
+  try {
+    val parsed = groovy.json.JsonSlurper().parse(gsFile) as? Map<*, *> ?: return@run ""
+    val clients = (parsed["client"] as? List<*>)?.filterIsInstance<Map<*, *>>().orEmpty()
+    val matchingClient = clients.firstOrNull { client ->
+      val info = client["client_info"] as? Map<*, *>
+      val androidInfo = info?.get("android_client_info") as? Map<*, *>
+      androidInfo?.get("package_name") == "com.aistudio.madrasampro.kxmp"
+    } ?: clients.firstOrNull()
+
+    val oauthClients = (matchingClient?.get("oauth_client") as? List<*>)
+      ?.filterIsInstance<Map<*, *>>()
+      .orEmpty()
+    val directType3 = oauthClients.firstOrNull {
+      (it["client_type"] as? Number)?.toInt() == 3
+    }?.get("client_id") as? String
+
+    if (!directType3.isNullOrBlank()) return@run directType3.trim()
+
+    val services = matchingClient?.get("services") as? Map<*, *>
+    val appInvite = services?.get("appinvite_service") as? Map<*, *>
+    val otherClients = (appInvite?.get("other_platform_oauth_client") as? List<*>)
+      ?.filterIsInstance<Map<*, *>>()
+      .orEmpty()
+    val otherType3 = otherClients.firstOrNull {
+      (it["client_type"] as? Number)?.toInt() == 3
+    }?.get("client_id") as? String
+
+    otherType3?.trim().orEmpty()
+  } catch (_: Exception) {
+    ""
+  }
+}
+
 android {
   namespace = "com.example"
   compileSdk { version = release(36) { minorApiLevel = 1 } }
@@ -18,6 +58,11 @@ android {
     targetSdk = 36
     versionCode = 1
     versionName = "1.0"
+
+    val escapedWebClientId = googleServicesWebClientId
+      .replace("\\", "\\\\")
+      .replace("\"", "\\\"")
+    buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", "\"$escapedWebClientId\"")
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
