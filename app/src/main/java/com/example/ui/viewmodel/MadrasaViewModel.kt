@@ -6,10 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.data.MadrasaInfo
 import com.example.data.MadrasaInfoStore
 import com.example.data.MadrasaRepository
-import com.example.data.cloud.CloudSyncRepository
-import com.example.data.cloud.CloudSyncStatus
 import com.example.data.entity.*
-import com.google.firebase.auth.FirebaseUser
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -29,66 +26,13 @@ data class BackupRestoreSummary(
 
 class MadrasaViewModel(
     appContext: Context,
-    private val repository: MadrasaRepository,
-    private val cloudSyncRepository: CloudSyncRepository,
-    initialUserId: String = ""
+    private val repository: MadrasaRepository
 ) : ViewModel() {
 
     private val appCtx: Context = appContext.applicationContext
 
-    var currentUserId: String = initialUserId
-        private set
-
     private val _madrasaInfo = MutableStateFlow(MadrasaInfoStore.getInfo(appCtx))
     val madrasaInfo: StateFlow<MadrasaInfo> = _madrasaInfo.asStateFlow()
-
-    val syncStatus: StateFlow<CloudSyncStatus> = cloudSyncRepository.syncStatus
-
-    init {
-        if (currentUserId.isNotBlank()) {
-            cloudSyncRepository.startSync(currentUserId, viewModelScope) { syncedInfo ->
-                _madrasaInfo.value = syncedInfo
-            }
-        } else {
-            cloudSyncRepository.stopSync()
-        }
-    }
-
-    fun updateAuthUser(user: FirebaseUser?) {
-        val nextUid = user?.uid.orEmpty()
-        if (nextUid == currentUserId) {
-            if (nextUid.isBlank()) {
-                cloudSyncRepository.stopSync()
-            }
-            return
-        }
-        currentUserId = nextUid
-        if (nextUid.isNotBlank()) {
-            cloudSyncRepository.startSync(nextUid, viewModelScope) { syncedInfo ->
-                _madrasaInfo.value = syncedInfo
-            }
-        } else {
-            cloudSyncRepository.stopSync()
-        }
-    }
-
-    fun stopCloudSync() {
-        cloudSyncRepository.stopSync()
-    }
-
-    suspend fun syncNow(): Result<Int> = withContext(Dispatchers.IO) {
-        val uid = currentUserId
-        if (uid.isBlank()) {
-            Result.failure(IllegalStateException("সিঙ্ক করতে অনুগ্রহ করে প্রথমে Google অ্যাকাউন্ট দিয়ে লগইন করুন"))
-        } else {
-            cloudSyncRepository.pushAllLocalDataToCloud(uid)
-        }
-    }
-
-    override fun onCleared() {
-        super.onCleared()
-        cloudSyncRepository.stopSync()
-    }
 
     private fun generateUniqueLocalId(existingIds: Set<Int>): Int {
         var candidate: Int
@@ -98,30 +42,23 @@ class MadrasaViewModel(
         return candidate
     }
 
+    private fun deterministicAttendanceId(date: String, studentId: Int): Int {
+        val h = "${date.trim()}_$studentId".hashCode() and 0x7FFFFFFF
+        return if (h == 0) 1 else h
+    }
+
     fun updateMadrasaInfo(name: String, address: String, phone: String, logoPath: String? = null) {
-        val uid = currentUserId.takeIf { it.isNotBlank() }
         val updated = MadrasaInfoStore.saveInfo(appCtx, name, address, phone, logoPath)
         _madrasaInfo.value = updated
         if (logoPath != null) {
             com.example.util.MadrasaLogoUtil.cleanupOldLogoFiles(appCtx, updated.logoPath)
         }
-        if (uid != null) {
-            viewModelScope.launch(Dispatchers.IO) {
-                cloudSyncRepository.pushInstitutionToCloud(uid, updated)
-            }
-        }
     }
 
     fun updateMadrasaLogo(logoPath: String) {
-        val uid = currentUserId.takeIf { it.isNotBlank() }
         val updated = MadrasaInfoStore.saveLogoPath(appCtx, logoPath)
         _madrasaInfo.value = updated
         com.example.util.MadrasaLogoUtil.cleanupOldLogoFiles(appCtx, updated.logoPath)
-        if (uid != null) {
-            viewModelScope.launch(Dispatchers.IO) {
-                cloudSyncRepository.pushInstitutionToCloud(uid, updated)
-            }
-        }
     }
 
     val students: StateFlow<List<StudentEntity>> = repository.allStudents
@@ -164,7 +101,6 @@ class MadrasaViewModel(
         roll: String = "",
         electricBill: Double = 0.0
     ) {
-        val uid = currentUserId.takeIf { it.isNotBlank() }
         viewModelScope.launch(Dispatchers.IO) {
             val id = generateUniqueLocalId(students.value.map { it.id }.toSet())
             val entity = StudentEntity(
@@ -179,34 +115,22 @@ class MadrasaViewModel(
                 electricBill = electricBill
             )
             repository.insertStudent(entity)
-            if (uid != null) {
-                cloudSyncRepository.upsertStudentToCloud(uid, entity)
-            }
         }
     }
 
     fun updateStudent(student: StudentEntity) {
-        val uid = currentUserId.takeIf { it.isNotBlank() }
         viewModelScope.launch(Dispatchers.IO) {
             repository.insertStudent(student)
-            if (uid != null) {
-                cloudSyncRepository.upsertStudentToCloud(uid, student)
-            }
         }
     }
 
     fun deleteStudent(id: Int) {
-        val uid = currentUserId.takeIf { it.isNotBlank() }
         viewModelScope.launch(Dispatchers.IO) {
             repository.deleteStudent(id)
-            if (uid != null) {
-                cloudSyncRepository.deleteStudentFromCloud(uid, id)
-            }
         }
     }
 
     fun addFee(studentId: Int, amount: Double, type: String, month: String, customDate: String? = null) {
-        val uid = currentUserId.takeIf { it.isNotBlank() }
         viewModelScope.launch(Dispatchers.IO) {
             val id = generateUniqueLocalId(fees.value.map { it.id }.toSet())
             val dateStr = customDate ?: SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date())
@@ -219,40 +143,27 @@ class MadrasaViewModel(
                 date = dateStr
             )
             repository.insertFee(entity)
-            if (uid != null) {
-                cloudSyncRepository.upsertFeeToCloud(uid, entity)
-            }
         }
     }
 
     fun deleteFee(id: Int) {
-        val uid = currentUserId.takeIf { it.isNotBlank() }
         viewModelScope.launch(Dispatchers.IO) {
             repository.deleteFee(id)
-            if (uid != null) {
-                cloudSyncRepository.deleteFeeFromCloud(uid, id)
-            }
         }
     }
 
     fun saveAttendance(date: String, attendanceMap: Map<Int, String>) {
         if (attendanceMap.isEmpty()) return
-        val uid = currentUserId.takeIf { it.isNotBlank() }
         viewModelScope.launch(Dispatchers.IO) {
             val entries = attendanceMap.map { (studentId, status) ->
                 AttendanceEntity(
-                    id = CloudSyncRepository.deterministicAttendanceId(date, studentId),
+                    id = deterministicAttendanceId(date, studentId),
                     date = date,
                     studentId = studentId,
                     status = status
                 )
             }
             repository.insertAllAttendance(entries)
-            if (uid != null) {
-                entries.forEach { entry ->
-                    cloudSyncRepository.upsertAttendanceToCloud(uid, entry)
-                }
-            }
         }
     }
 
@@ -264,7 +175,6 @@ class MadrasaViewModel(
         existingDate: String? = null
     ) {
         if (subjects.isEmpty()) return
-        val uid = currentUserId.takeIf { it.isNotBlank() }
         viewModelScope.launch(Dispatchers.IO) {
             val resolvedId = if (id > 0) id else generateUniqueLocalId(results.value.map { it.id }.toSet())
             val total = subjects.sumOf { it.mark }
@@ -280,19 +190,12 @@ class MadrasaViewModel(
                 date = dateStr
             )
             repository.insertResult(entity)
-            if (uid != null) {
-                cloudSyncRepository.upsertResultToCloud(uid, entity)
-            }
         }
     }
 
     fun deleteResult(id: Int) {
-        val uid = currentUserId.takeIf { it.isNotBlank() }
         viewModelScope.launch(Dispatchers.IO) {
             repository.deleteResult(id)
-            if (uid != null) {
-                cloudSyncRepository.deleteResultFromCloud(uid, id)
-            }
         }
     }
 
@@ -305,7 +208,6 @@ class MadrasaViewModel(
         photoUri: String = "",
         joinDate: String = ""
     ) {
-        val uid = currentUserId.takeIf { it.isNotBlank() }
         viewModelScope.launch(Dispatchers.IO) {
             val id = generateUniqueLocalId(teachers.value.map { it.id }.toSet())
             val effectiveJoinDate = if (joinDate.isNotBlank()) joinDate else SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date())
@@ -320,29 +222,18 @@ class MadrasaViewModel(
                 joinDate = effectiveJoinDate
             )
             repository.insertTeacher(entity)
-            if (uid != null) {
-                cloudSyncRepository.upsertTeacherToCloud(uid, entity)
-            }
         }
     }
 
     fun updateTeacher(teacher: TeacherEntity) {
-        val uid = currentUserId.takeIf { it.isNotBlank() }
         viewModelScope.launch(Dispatchers.IO) {
             repository.insertTeacher(teacher)
-            if (uid != null) {
-                cloudSyncRepository.upsertTeacherToCloud(uid, teacher)
-            }
         }
     }
 
     fun deleteTeacher(id: Int) {
-        val uid = currentUserId.takeIf { it.isNotBlank() }
         viewModelScope.launch(Dispatchers.IO) {
             repository.deleteTeacher(id)
-            if (uid != null) {
-                cloudSyncRepository.deleteTeacherFromCloud(uid, id)
-            }
         }
     }
 
@@ -354,7 +245,6 @@ class MadrasaViewModel(
         note: String = "",
         date: String? = null
     ) {
-        val uid = currentUserId.takeIf { it.isNotBlank() }
         viewModelScope.launch(Dispatchers.IO) {
             val id = generateUniqueLocalId(teacherPayments.value.map { it.id }.toSet())
             val dateStr = date ?: SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date())
@@ -368,65 +258,42 @@ class MadrasaViewModel(
                 note = note
             )
             repository.insertTeacherPayment(entity)
-            if (uid != null) {
-                cloudSyncRepository.upsertTeacherPaymentToCloud(uid, entity)
-            }
         }
     }
 
     fun deleteTeacherPayment(id: Int) {
-        val uid = currentUserId.takeIf { it.isNotBlank() }
         viewModelScope.launch(Dispatchers.IO) {
             repository.deleteTeacherPayment(id)
-            if (uid != null) {
-                cloudSyncRepository.deleteTeacherPaymentFromCloud(uid, id)
-            }
         }
     }
 
     fun addExpense(type: String, desc: String, amount: Double, customDate: String? = null) {
-        val uid = currentUserId.takeIf { it.isNotBlank() }
         viewModelScope.launch(Dispatchers.IO) {
             val id = generateUniqueLocalId(expenses.value.map { it.id }.toSet())
             val dateStr = customDate ?: SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date())
             val entity = ExpenseEntity(id = id, type = type, desc = desc, amount = amount, date = dateStr)
             repository.insertExpense(entity)
-            if (uid != null) {
-                cloudSyncRepository.upsertExpenseToCloud(uid, entity)
-            }
         }
     }
 
     fun deleteExpense(id: Int) {
-        val uid = currentUserId.takeIf { it.isNotBlank() }
         viewModelScope.launch(Dispatchers.IO) {
             repository.deleteExpense(id)
-            if (uid != null) {
-                cloudSyncRepository.deleteExpenseFromCloud(uid, id)
-            }
         }
     }
 
     fun addNotice(title: String, description: String) {
-        val uid = currentUserId.takeIf { it.isNotBlank() }
         viewModelScope.launch(Dispatchers.IO) {
             val id = generateUniqueLocalId(notices.value.map { it.id }.toSet())
             val dateStr = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date())
             val entity = NoticeEntity(id = id, title = title, description = description, date = dateStr)
             repository.insertNotice(entity)
-            if (uid != null) {
-                cloudSyncRepository.upsertNoticeToCloud(uid, entity)
-            }
         }
     }
 
     fun deleteNotice(id: Int) {
-        val uid = currentUserId.takeIf { it.isNotBlank() }
         viewModelScope.launch(Dispatchers.IO) {
             repository.deleteNotice(id)
-            if (uid != null) {
-                cloudSyncRepository.deleteNoticeFromCloud(uid, id)
-            }
         }
     }
 
@@ -439,7 +306,6 @@ class MadrasaViewModel(
         instructions: String,
         questionsText: String
     ) {
-        val uid = currentUserId.takeIf { it.isNotBlank() }
         viewModelScope.launch(Dispatchers.IO) {
             val id = generateUniqueLocalId(questionPapers.value.map { it.id }.toSet())
             val dateStr = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date())
@@ -455,19 +321,12 @@ class MadrasaViewModel(
                 date = dateStr
             )
             repository.insertQuestionPaper(entity)
-            if (uid != null) {
-                cloudSyncRepository.upsertQuestionPaperToCloud(uid, entity)
-            }
         }
     }
 
     fun deleteQuestionPaper(id: Int) {
-        val uid = currentUserId.takeIf { it.isNotBlank() }
         viewModelScope.launch(Dispatchers.IO) {
             repository.deleteQuestionPaper(id)
-            if (uid != null) {
-                cloudSyncRepository.deleteQuestionPaperFromCloud(uid, id)
-            }
         }
     }
 
@@ -479,7 +338,6 @@ class MadrasaViewModel(
         teacherName: String,
         duration: String = ""
     ) {
-        val uid = currentUserId.takeIf { it.isNotBlank() }
         viewModelScope.launch(Dispatchers.IO) {
             val id = generateUniqueLocalId(classRoutines.value.map { it.id }.toSet())
             val entity = ClassRoutineEntity(
@@ -492,19 +350,12 @@ class MadrasaViewModel(
                 duration = duration
             )
             repository.insertClassRoutine(entity)
-            if (uid != null) {
-                cloudSyncRepository.upsertClassRoutineToCloud(uid, entity)
-            }
         }
     }
 
     fun deleteClassRoutine(id: Int) {
-        val uid = currentUserId.takeIf { it.isNotBlank() }
         viewModelScope.launch(Dispatchers.IO) {
             repository.deleteClassRoutine(id)
-            if (uid != null) {
-                cloudSyncRepository.deleteClassRoutineFromCloud(uid, id)
-            }
         }
     }
 
@@ -1066,10 +917,6 @@ class MadrasaViewModel(
                     }
                 }
                 if (routinesToSave.isNotEmpty()) repository.insertAllClassRoutines(routinesToSave)
-            }
-
-            if (currentUserId.isNotBlank() && addedOrUpdated > 0) {
-                cloudSyncRepository.pushAllLocalDataToCloud(currentUserId)
             }
 
             Result.success(

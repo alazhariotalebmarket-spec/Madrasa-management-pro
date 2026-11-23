@@ -14,8 +14,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Login
-import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
@@ -25,30 +23,18 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.example.ui.auth.AuthGuardState
-import com.example.ui.auth.LocalAuthGuard
-import com.example.ui.auth.LoginRequiredDialog
-import com.example.ui.auth.UserProfileAvatar
-import com.example.ui.auth.signOutFromCloudSync
 import com.example.ui.components.IslamicPatternOverlay
 import com.example.ui.components.MadrasaHeaderGradient
+import com.example.ui.components.MadrasaRoundLogo
 import com.example.ui.components.SubScreenTopBar
 import com.example.ui.theme.MadrasaGold
-import com.example.ui.theme.MadrasaGreen
-import com.example.ui.theme.MadrasaPrimary
-import com.example.ui.theme.MadrasaRed
 import com.example.ui.theme.MadrasaSky
 import com.example.ui.viewmodel.MadrasaViewModel
-import com.google.firebase.Firebase
-import com.google.firebase.auth.FirebaseUser
-import com.google.firebase.auth.auth
 import kotlinx.coroutines.launch
 
 private data class BottomNavTab(
@@ -80,7 +66,7 @@ private fun subScreenMeta(route: String): Pair<String, String> = when (route) {
     "financial" -> "আর্থিক বিবরণী" to "মাদ্রাসার আয়-ব্যয়ের পূর্ণাঙ্গ হিসাব"
     "merit_list" -> "মেধাতালিকা" to "পরীক্ষার মেধাক্রম ও PDF রিপোর্ট"
     "notice" -> "নোটিশ বোর্ড" to "ঘোষণা প্রকাশ ও হাই-রেজুলেশন ফটো"
-    "backup" -> "অ্যাকাউন্ট, প্রোফাইল ও ব্যাকআপ" to "লগইন, ক্লাউড সিঙ্ক, ফাইল ও গুগল ড্রাইভ"
+    "backup" -> "অফলাইন ব্যাকআপ ও রিস্টোর" to "ফোনে JSON ব্যাকআপ সেভ, শেয়ার ও রিস্টোর"
     "developer" -> "ডেভেলপার" to "প্রস্তুতকারকের তথ্য ও APK ডাউনলোড"
     else -> "M PRO" to ""
 }
@@ -88,37 +74,12 @@ private fun subScreenMeta(route: String): Pair<String, String> = when (route) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainAppScaffold(
-    viewModel: MadrasaViewModel,
-    currentUser: FirebaseUser?
+    viewModel: MadrasaViewModel
 ) {
-    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
 
     var currentTab by rememberSaveable { mutableStateOf("dashboard") }
-    var showLoginDialog by remember { mutableStateOf(false) }
-    var pendingProtectedAction by remember { mutableStateOf<(() -> Unit)?>(null) }
-
-    val authGuard = remember(currentUser) {
-        AuthGuardState(
-            isLoggedIn = currentUser != null,
-            currentUser = currentUser,
-            requireAuth = { action ->
-                val activeUser = currentUser ?: Firebase.auth.currentUser
-                if (activeUser != null) {
-                    viewModel.updateAuthUser(activeUser)
-                    action()
-                } else {
-                    pendingProtectedAction = action
-                    showLoginDialog = true
-                }
-            },
-            openLoginDialog = {
-                pendingProtectedAction = null
-                showLoginDialog = true
-            }
-        )
-    }
 
     // Intercept hardware/system Back button: close drawer first, otherwise return to Dashboard
     BackHandler(enabled = drawerState.isOpen || currentTab != "dashboard") {
@@ -139,7 +100,6 @@ fun MainAppScaffold(
     val questionPapers by viewModel.questionPapers.collectAsStateWithLifecycle()
     val classRoutines by viewModel.classRoutines.collectAsStateWithLifecycle()
     val madrasaInfo by viewModel.madrasaInfo.collectAsStateWithLifecycle()
-    val syncStatus by viewModel.syncStatus.collectAsStateWithLifecycle()
 
     val bottomTabs = remember {
         listOf(
@@ -162,191 +122,129 @@ fun MainAppScaffold(
             DrawerNavItem("fees", "বেতন ও বিদ্যুৎ বিল", Icons.Default.Payments),
             DrawerNavItem("results", "পরীক্ষার রেজাল্ট", Icons.Default.School),
             DrawerNavItem("accounts", "আয়-ব্যয় ও হিসাব", Icons.Default.AccountBalanceWallet),
-            DrawerNavItem("backup", "প্রোফাইল, অ্যাকাউন্ট ও ব্যাকআপ", Icons.Default.ManageAccounts),
+            DrawerNavItem("backup", "অফলাইন ব্যাকআপ ও রিস্টোর", Icons.Default.Backup),
             DrawerNavItem("developer", "ডেভেলপার ও APK", Icons.Default.Code)
         )
     }
 
-    CompositionLocalProvider(LocalAuthGuard provides authGuard) {
-        ModalNavigationDrawer(
-            drawerState = drawerState,
-            drawerContent = {
-                ModalDrawerSheet(
-                    modifier = Modifier.widthIn(max = 310.dp),
-                    drawerContainerColor = MaterialTheme.colorScheme.surface
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            ModalDrawerSheet(
+                modifier = Modifier.widthIn(max = 310.dp),
+                drawerContainerColor = MaterialTheme.colorScheme.surface
+            ) {
+                // Drawer Institution Header (100% Offline)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MadrasaHeaderGradient)
                 ) {
-                    // Drawer Profile / Account Header
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(MadrasaHeaderGradient)
-                    ) {
-                        IslamicPatternOverlay(modifier = Modifier.matchParentSize())
-
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .statusBarsPadding()
-                                .padding(horizontal = 18.dp, vertical = 20.dp)
-                        ) {
-                            UserProfileAvatar(
-                                photoUrl = currentUser?.photoUrl,
-                                size = 62.dp,
-                                borderWidth = 2.dp,
-                                borderColor = MadrasaGold,
-                                contentDescription = currentUser?.displayName ?: "Guest User"
-                            )
-                            Spacer(modifier = Modifier.height(10.dp))
-                            if (currentUser != null) {
-                                Text(
-                                    text = currentUser.displayName?.takeIf { it.isNotBlank() } ?: "M PRO Account",
-                                    color = Color.White,
-                                    fontSize = 16.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                if (!currentUser.email.isNullOrBlank()) {
-                                    Text(
-                                        text = currentUser.email ?: "",
-                                        color = MadrasaSky,
-                                        fontSize = 12.sp,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                                Spacer(modifier = Modifier.height(8.dp))
-                                OutlinedButton(
-                                    onClick = {
-                                        scope.launch { drawerState.close() }
-                                        signOutFromCloudSync(
-                                            context = context,
-                                            scope = scope,
-                                            beforeSignOut = { viewModel.stopCloudSync() }
-                                        )
-                                    },
-                                    shape = RoundedCornerShape(10.dp),
-                                    colors = ButtonDefaults.outlinedButtonColors(
-                                        containerColor = Color.White.copy(alpha = 0.12f),
-                                        contentColor = Color.White
-                                    ),
-                                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.45f)),
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .heightIn(min = 42.dp)
-                                        .testTag("drawer_logout_button")
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.AutoMirrored.Filled.Logout,
-                                        contentDescription = "Logout",
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Logout (লগআউট)", fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
-                                }
-                            } else {
-                                Text(
-                                    text = "Guest User (অতিথি)",
-                                    color = Color.White,
-                                    fontSize = 16.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Text(
-                                    text = "অফলাইন মোড • ক্লাউড সিঙ্ক করতে লগইন করুন",
-                                    color = MadrasaSky,
-                                    fontSize = 11.5.sp
-                                )
-                                Spacer(modifier = Modifier.height(10.dp))
-                                Button(
-                                    onClick = {
-                                        scope.launch { drawerState.close() }
-                                        authGuard.openLoginDialog()
-                                    },
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = MadrasaGold,
-                                        contentColor = Color(0xFF063D23)
-                                    ),
-                                    shape = RoundedCornerShape(10.dp),
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .heightIn(min = 44.dp)
-                                        .testTag("drawer_google_sign_in_button")
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.AutoMirrored.Filled.Login,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(17.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(
-                                        text = "Sign in with Google",
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(8.dp))
+                    IslamicPatternOverlay(modifier = Modifier.matchParentSize())
 
                     Column(
                         modifier = Modifier
-                            .weight(1f)
-                            .verticalScroll(rememberScrollState())
-                            .padding(horizontal = 10.dp)
+                            .fillMaxWidth()
+                            .statusBarsPadding()
+                            .padding(horizontal = 18.dp, vertical = 20.dp)
                     ) {
-                        drawerItems.forEach { item ->
-                            NavigationDrawerItem(
-                                label = {
-                                    Text(
-                                        text = item.label,
-                                        fontSize = 13.5.sp,
-                                        fontWeight = if (currentTab == item.route) FontWeight.Bold else FontWeight.Medium
-                                    )
-                                },
-                                selected = currentTab == item.route,
-                                onClick = {
-                                    currentTab = item.route
-                                    scope.launch { drawerState.close() }
-                                },
-                                icon = {
-                                    Icon(
-                                        imageVector = item.icon,
-                                        contentDescription = null
-                                    )
-                                },
-                                colors = NavigationDrawerItemDefaults.colors(
-                                    selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                                    selectedIconColor = MaterialTheme.colorScheme.primary,
-                                    selectedTextColor = MaterialTheme.colorScheme.primary
-                                ),
-                                modifier = Modifier.padding(vertical = 2.dp)
+                        MadrasaRoundLogo(
+                            logoPath = madrasaInfo.logoPath,
+                            size = 64.dp,
+                            borderWidth = 2.dp,
+                            borderColor = MadrasaGold,
+                            contentDescription = madrasaInfo.name
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Text(
+                            text = madrasaInfo.name,
+                            color = Color.White,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Spacer(modifier = Modifier.height(3.dp))
+                        Text(
+                            text = madrasaInfo.address,
+                            color = MadrasaSky,
+                            fontSize = 11.5.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = Color.White.copy(alpha = 0.14f),
+                            border = BorderStroke(1.dp, MadrasaGold.copy(alpha = 0.55f))
+                        ) {
+                            Text(
+                                text = "M PRO • অফলাইন ম্যানেজমেন্ট",
+                                color = MadrasaGold,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
                             )
                         }
-                        Spacer(modifier = Modifier.navigationBarsPadding())
                     }
                 }
-            }
-        ) {
-            Scaffold(
-                modifier = Modifier.fillMaxSize(),
-                containerColor = MaterialTheme.colorScheme.background,
-                contentWindowInsets = WindowInsets(0, 0, 0, 0),
-                topBar = {
-                    if (currentTab != "dashboard") {
-                        val (title, subtitle) = subScreenMeta(currentTab)
-                        SubScreenTopBar(
-                            title = title,
-                            subtitle = subtitle,
-                            logoPath = madrasaInfo.logoPath,
-                            currentUser = currentUser,
-                            onLoginClick = { authGuard.openLoginDialog() },
-                            onProfileClick = { scope.launch { drawerState.open() } },
-                            onBack = { currentTab = "dashboard" }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 10.dp)
+                ) {
+                    drawerItems.forEach { item ->
+                        NavigationDrawerItem(
+                            label = {
+                                Text(
+                                    text = item.label,
+                                    fontSize = 13.5.sp,
+                                    fontWeight = if (currentTab == item.route) FontWeight.Bold else FontWeight.Medium
+                                )
+                            },
+                            selected = currentTab == item.route,
+                            onClick = {
+                                currentTab = item.route
+                                scope.launch { drawerState.close() }
+                            },
+                            icon = {
+                                Icon(
+                                    imageVector = item.icon,
+                                    contentDescription = null
+                                )
+                            },
+                            colors = NavigationDrawerItemDefaults.colors(
+                                selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                                selectedIconColor = MaterialTheme.colorScheme.primary,
+                                selectedTextColor = MaterialTheme.colorScheme.primary
+                            ),
+                            modifier = Modifier.padding(vertical = 2.dp)
                         )
                     }
-                },
+                    Spacer(modifier = Modifier.navigationBarsPadding())
+                }
+            }
+        }
+    ) {
+        Scaffold(
+            modifier = Modifier.fillMaxSize(),
+            containerColor = MaterialTheme.colorScheme.background,
+            contentWindowInsets = WindowInsets(0, 0, 0, 0),
+            topBar = {
+                if (currentTab != "dashboard") {
+                    val (title, subtitle) = subScreenMeta(currentTab)
+                    SubScreenTopBar(
+                        title = title,
+                        subtitle = subtitle,
+                        logoPath = madrasaInfo.logoPath,
+                        onBack = { currentTab = "dashboard" }
+                    )
+                }
+            },
                 bottomBar = {
                     Column {
                         HorizontalDivider(
@@ -411,10 +309,7 @@ fun MainAppScaffold(
                                 students = students,
                                 fees = fees,
                                 madrasaInfo = madrasaInfo,
-                                syncStatus = syncStatus,
-                                currentUser = currentUser,
                                 onOpenDrawer = { scope.launch { drawerState.open() } },
-                                onLoginClick = { authGuard.openLoginDialog() },
                                 onUpdateMadrasaInfo = { name, address, phone, logoPath ->
                                     viewModel.updateMadrasaInfo(name, address, phone, logoPath)
                                 },
@@ -559,8 +454,7 @@ fun MainAppScaffold(
                                 }
                             )
                             "backup" -> BackupScreen(
-                                viewModel = viewModel,
-                                currentUser = currentUser
+                                viewModel = viewModel
                             )
                             "developer" -> DeveloperScreen(
                                 onBack = { currentTab = "dashboard" }
@@ -570,24 +464,4 @@ fun MainAppScaffold(
                 }
             }
         }
-
-        if (showLoginDialog) {
-            LoginRequiredDialog(
-                onDismiss = {
-                    showLoginDialog = false
-                    pendingProtectedAction = null
-                },
-                onLoginSuccess = {
-                    val action = pendingProtectedAction
-                    pendingProtectedAction = null
-                    showLoginDialog = false
-                    val signedIn = Firebase.auth.currentUser
-                    if (signedIn != null) {
-                        viewModel.updateAuthUser(signedIn)
-                        action?.invoke()
-                    }
-                }
-            )
-        }
-    }
 }

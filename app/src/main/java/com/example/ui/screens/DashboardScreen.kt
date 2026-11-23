@@ -20,7 +20,6 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Login
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -41,11 +40,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
 import com.example.data.MadrasaInfo
-import com.example.data.cloud.CloudSyncStatus
-import com.example.data.cloud.SyncConnectionState
 import com.example.data.entity.FeeEntity
 import com.example.data.entity.StudentEntity
-import com.example.ui.auth.UserProfileAvatar
 import com.example.ui.components.ImageCropperDialog
 import com.example.ui.components.IslamicPatternOverlay
 import com.example.ui.components.MadrasaHeaderGradient
@@ -58,7 +54,6 @@ import com.example.ui.theme.MadrasaRed
 import com.example.ui.theme.MadrasaSapphire
 import com.example.ui.theme.MadrasaSky
 import com.example.util.PdfPrintUtil
-import com.google.firebase.auth.FirebaseUser
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -75,10 +70,7 @@ fun DashboardScreen(
     students: List<StudentEntity>,
     fees: List<FeeEntity>,
     madrasaInfo: MadrasaInfo,
-    syncStatus: CloudSyncStatus = CloudSyncStatus(),
-    currentUser: FirebaseUser? = null,
     onOpenDrawer: () -> Unit = {},
-    onLoginClick: () -> Unit = {},
     onUpdateMadrasaInfo: (String, String, String, String?) -> Unit,
     onUpdateMadrasaLogo: (String) -> Unit,
     onNavigate: (String) -> Unit
@@ -180,67 +172,33 @@ fun DashboardScreen(
                             )
                         }
 
-                        if (currentUser == null) {
-                            Surface(
-                                shape = RoundedCornerShape(10.dp),
-                                color = MadrasaGold,
-                                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.7f)),
-                                modifier = Modifier
-                                    .heightIn(min = 38.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .clickable { onLoginClick() }
-                                    .testTag("topbar_login_button")
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = MadrasaGold,
+                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.7f)),
+                            modifier = Modifier
+                                .heightIn(min = 38.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable { onNavigate("backup") }
+                                .testTag("topbar_backup_button")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.AutoMirrored.Filled.Login,
-                                        contentDescription = "Sign in with Google",
-                                        tint = Color(0xFF063D23),
-                                        modifier = Modifier.size(15.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(5.dp))
-                                    Text(
-                                        text = "Sign in with Google",
-                                        color = Color(0xFF063D23),
-                                        fontSize = 11.5.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                            }
-                        } else {
-                            Surface(
-                                shape = RoundedCornerShape(999.dp),
-                                color = Color.White.copy(alpha = 0.16f),
-                                border = BorderStroke(1.dp, MadrasaGold.copy(alpha = 0.55f)),
-                                modifier = Modifier
-                                    .heightIn(min = 38.dp)
-                                    .clip(RoundedCornerShape(999.dp))
-                                    .clickable { onOpenDrawer() }
-                                    .testTag("topbar_profile_button")
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(start = 4.dp, end = 10.dp, top = 4.dp, bottom = 4.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    UserProfileAvatar(
-                                        photoUrl = currentUser.photoUrl,
-                                        size = 28.dp,
-                                        borderWidth = 1.dp,
-                                        contentDescription = currentUser.displayName ?: "Profile"
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(
-                                        text = currentUser.displayName?.substringBefore(" ")?.takeIf { it.isNotBlank() } ?: "প্রোফাইল",
-                                        color = Color.White,
-                                        fontSize = 11.5.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
+                                Icon(
+                                    imageVector = Icons.Default.Backup,
+                                    contentDescription = "অফলাইন ব্যাকআপ ও রিস্টোর",
+                                    tint = Color(0xFF063D23),
+                                    modifier = Modifier.size(15.dp)
+                                )
+                                Spacer(modifier = Modifier.width(5.dp))
+                                Text(
+                                    text = "ব্যাকআপ",
+                                    color = Color(0xFF063D23),
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
                             }
                         }
                     }
@@ -398,14 +356,14 @@ fun DashboardScreen(
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             Icon(
-                                                imageVector = Icons.Default.ManageAccounts,
-                                                contentDescription = "অ্যাকাউন্ট ও ব্যাকআপ",
+                                                imageVector = Icons.Default.Storage,
+                                                contentDescription = "ব্যাকআপ ও রিস্টোর",
                                                 tint = MadrasaSky,
                                                 modifier = Modifier.size(13.dp)
                                             )
                                             Spacer(modifier = Modifier.width(3.dp))
                                             Text(
-                                                text = "অ্যাকাউন্ট",
+                                                text = "ব্যাকআপ",
                                                 color = Color.White,
                                                 fontSize = 11.sp,
                                                 fontWeight = FontWeight.SemiBold
@@ -417,27 +375,14 @@ fun DashboardScreen(
 
                             Spacer(modifier = Modifier.height(6.dp))
 
-                            val (dotColor, statusBadgeText) = if (currentUser == null) {
-                                MadrasaGold to "অফলাইন মোড চালু • ক্লাউড সিঙ্কের জন্য লগইন করুন"
-                            } else {
-                                when (syncStatus.state) {
-                                    SyncConnectionState.LIVE -> Color(0xFF4ADE80) to "লাইভ সিঙ্ক চালু"
-                                    SyncConnectionState.SYNCING -> MadrasaSky to "সিঙ্ক হচ্ছে..."
-                                    SyncConnectionState.OFFLINE_PENDING -> MadrasaGold to "অফলাইন (অনলাইন হলে সিঙ্ক হবে)"
-                                    SyncConnectionState.ERROR -> Color(0xFFFCA5A5) to "সিঙ্ক সমস্যা"
-                                    SyncConnectionState.IDLE -> Color.White.copy(alpha = 0.7f) to "সিঙ্ক প্রস্তুত"
-                                }
-                            }
                             Surface(
                                 shape = RoundedCornerShape(8.dp),
                                 color = Color.Black.copy(alpha = 0.22f),
                                 border = BorderStroke(0.8.dp, Color.White.copy(alpha = 0.18f)),
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(8.dp))
-                                    .clickable {
-                                        if (currentUser == null) onLoginClick() else onNavigate("backup")
-                                    }
-                                    .testTag("dashboard_cloud_sync_pill")
+                                    .clickable { onNavigate("backup") }
+                                    .testTag("dashboard_offline_status_pill")
                             ) {
                                 Row(
                                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
@@ -447,17 +392,11 @@ fun DashboardScreen(
                                         modifier = Modifier
                                             .size(7.dp)
                                             .clip(CircleShape)
-                                            .background(dotColor)
+                                            .background(Color(0xFF4ADE80))
                                     )
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Text(
-                                        text = buildString {
-                                            append(statusBadgeText)
-                                            if (currentUser != null && syncStatus.userEmail.isNotBlank()) {
-                                                append(" • ")
-                                                append(syncStatus.userEmail)
-                                            }
-                                        },
+                                        text = "অফলাইন মোড চালু • ব্যাকআপ ও রিস্টোর",
                                         color = Color.White.copy(alpha = 0.92f),
                                         fontSize = 10.5.sp,
                                         maxLines = 1,

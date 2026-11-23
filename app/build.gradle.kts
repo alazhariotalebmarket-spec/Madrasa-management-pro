@@ -1,51 +1,9 @@
-import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesStrategy
-
 plugins {
   alias(libs.plugins.android.application)
   alias(libs.plugins.kotlin.compose)
   alias(libs.plugins.google.devtools.ksp)
   alias(libs.plugins.secrets)
-  alias(libs.plugins.google.services)
-}
-
-val googleServicesWebClientId: String = run {
-  val envOverride = System.getenv("GOOGLE_WEB_CLIENT_ID")?.trim().orEmpty()
-  if (envOverride.isNotEmpty()) return@run envOverride
-
-  val gsFile = file("google-services.json")
-  if (!gsFile.exists()) return@run ""
-
-  try {
-    val parsed = groovy.json.JsonSlurper().parse(gsFile) as? Map<*, *> ?: return@run ""
-    val clients = (parsed["client"] as? List<*>)?.filterIsInstance<Map<*, *>>().orEmpty()
-    val matchingClient = clients.firstOrNull { client ->
-      val info = client["client_info"] as? Map<*, *>
-      val androidInfo = info?.get("android_client_info") as? Map<*, *>
-      androidInfo?.get("package_name") == "com.aistudio.madrasampro.kxmp"
-    } ?: clients.firstOrNull()
-
-    val oauthClients = (matchingClient?.get("oauth_client") as? List<*>)
-      ?.filterIsInstance<Map<*, *>>()
-      .orEmpty()
-    val directType3 = oauthClients.firstOrNull {
-      (it["client_type"] as? Number)?.toInt() == 3
-    }?.get("client_id") as? String
-
-    if (!directType3.isNullOrBlank()) return@run directType3.trim()
-
-    val services = matchingClient?.get("services") as? Map<*, *>
-    val appInvite = services?.get("appinvite_service") as? Map<*, *>
-    val otherClients = (appInvite?.get("other_platform_oauth_client") as? List<*>)
-      ?.filterIsInstance<Map<*, *>>()
-      .orEmpty()
-    val otherType3 = otherClients.firstOrNull {
-      (it["client_type"] as? Number)?.toInt() == 3
-    }?.get("client_id") as? String
-
-    otherType3?.trim().orEmpty()
-  } catch (_: Exception) {
-    ""
-  }
+  // alias(libs.plugins.google.services)
 }
 
 android {
@@ -58,11 +16,6 @@ android {
     targetSdk = 36
     versionCode = 1
     versionName = "1.0"
-
-    val escapedWebClientId = googleServicesWebClientId
-      .replace("\\", "\\\\")
-      .replace("\"", "\\\"")
-    buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", "\"$escapedWebClientId\"")
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -123,13 +76,13 @@ secrets {
   ignoreList.add("FIREBASE_APPCHECK_DEBUG_TOKEN")
 }
 
-googleServices { missingGoogleServicesStrategy = MissingGoogleServicesStrategy.WARN }
+// googleServices { missingGoogleServicesStrategy = MissingGoogleServicesStrategy.WARN }
 
 // Some unused dependencies are commented out below instead of being removed.
 // This makes it easy to add them back in the future if needed.
 dependencies {
   implementation(platform(libs.androidx.compose.bom))
-  implementation(platform(libs.firebase.bom))
+  // implementation(platform(libs.firebase.bom))
   // implementation(libs.accompanist.permissions)
   implementation(libs.androidx.activity.compose)
   // implementation(libs.androidx.camera.camera2)
@@ -151,24 +104,23 @@ dependencies {
   implementation(libs.androidx.room.ktx)
   implementation(libs.androidx.room.runtime)
   implementation(libs.coil.compose)
-  implementation(libs.converter.moshi)
-  implementation(libs.firebase.ai)
-  // Firestore & Credential Manager Google Sign-In
-  implementation(libs.firebase.firestore)
-  implementation(libs.firebase.auth)
-  implementation(libs.androidx.credentials)
-  implementation(libs.androidx.credentials.play.services)
-  implementation(libs.googleid)
-  implementation(libs.firebase.appcheck.recaptcha)
-  implementation(libs.firebase.appcheck.debug)
-  implementation(libs.play.services.auth)
+  // implementation(libs.converter.moshi)
+  // implementation(libs.firebase.ai)
+  // implementation(libs.firebase.firestore)
+  // implementation(libs.firebase.auth)
+  // implementation(libs.androidx.credentials)
+  // implementation(libs.androidx.credentials.play.services)
+  // implementation(libs.googleid)
+  // implementation(libs.firebase.appcheck.recaptcha)
+  // implementation(libs.firebase.appcheck.debug)
+  // implementation(libs.play.services.auth)
   implementation(libs.kotlinx.coroutines.android)
   implementation(libs.kotlinx.coroutines.core)
-  implementation(libs.logging.interceptor)
-  implementation(libs.moshi.kotlin)
-  implementation(libs.okhttp)
+  // implementation(libs.logging.interceptor)
+  // implementation(libs.moshi.kotlin)
+  // implementation(libs.okhttp)
   // implementation(libs.play.services.location)
-  implementation(libs.retrofit)
+  // implementation(libs.retrofit)
   testImplementation(libs.androidx.compose.ui.test.junit4)
   testImplementation(libs.androidx.core)
   testImplementation(libs.androidx.junit)
@@ -183,5 +135,5 @@ dependencies {
   debugImplementation(libs.androidx.compose.ui.test.manifest)
   debugImplementation(libs.androidx.compose.ui.tooling)
   "ksp"(libs.androidx.room.compiler)
-  "ksp"(libs.moshi.kotlin.codegen)
+  // "ksp"(libs.moshi.kotlin.codegen)
 }
