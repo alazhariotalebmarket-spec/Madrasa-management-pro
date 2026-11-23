@@ -14,6 +14,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Login
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.*
@@ -46,6 +47,9 @@ import com.example.ui.theme.MadrasaPrimaryDark
 import com.example.ui.theme.MadrasaRed
 import com.example.ui.theme.MadrasaSky
 import com.example.ui.theme.MadrasaTeal
+import androidx.compose.foundation.clickable
+import com.example.ui.auth.UserProfileAvatar
+import com.google.firebase.auth.FirebaseUser
 import java.io.File
 import kotlin.math.cos
 import kotlin.math.sin
@@ -253,6 +257,9 @@ fun SubScreenTopBar(
     title: String,
     subtitle: String? = null,
     logoPath: String = "",
+    currentUser: FirebaseUser? = null,
+    onLoginClick: (() -> Unit)? = null,
+    onProfileClick: (() -> Unit)? = null,
     onBack: () -> Unit
 ) {
     Surface(
@@ -320,7 +327,57 @@ fun SubScreenTopBar(
                         }
                     }
 
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+
+                    if (currentUser == null && onLoginClick != null) {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = MadrasaGold,
+                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.65f)),
+                            modifier = Modifier
+                                .heightIn(min = 38.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable { onLoginClick() }
+                                .testTag("subscreen_login_button")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.Login,
+                                    contentDescription = "লগইন",
+                                    tint = Color(0xFF063D23),
+                                    modifier = Modifier.size(15.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "Login",
+                                    color = Color(0xFF063D23),
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.width(6.dp))
+                    } else if (currentUser != null && onProfileClick != null) {
+                        Box(
+                            modifier = Modifier
+                                .size(42.dp)
+                                .clip(CircleShape)
+                                .clickable { onProfileClick() }
+                                .testTag("subscreen_profile_button"),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            UserProfileAvatar(
+                                photoUrl = currentUser.photoUrl,
+                                size = 34.dp,
+                                borderWidth = 1.5.dp,
+                                contentDescription = currentUser.displayName ?: "প্রোফাইল"
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(4.dp))
+                    }
 
                     MadrasaRoundLogo(
                         logoPath = logoPath,

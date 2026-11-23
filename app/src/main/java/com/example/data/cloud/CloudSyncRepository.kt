@@ -529,7 +529,13 @@ class CloudSyncRepository(
         syncJob?.cancel()
         syncJob = null
         activeUid = null
-        _syncStatus.value = CloudSyncStatus(state = SyncConnectionState.IDLE)
+        _syncStatus.value = CloudSyncStatus(
+            state = SyncConnectionState.IDLE,
+            userEmail = "",
+            lastSyncedTime = "",
+            message = "অফলাইন মোড চালু • ক্লাউড সিঙ্কের জন্য লগইন করুন",
+            errorMessage = null
+        )
     }
 
     private suspend fun upsertDocument(

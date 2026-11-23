@@ -236,8 +236,8 @@ fun AttendanceScreen(
                                             )
                                         },
                                         onClick = {
-                                            attendanceState[student.id] = opt
                                             expanded = false
+                                            attendanceState[student.id] = opt
                                         }
                                     )
                                 }

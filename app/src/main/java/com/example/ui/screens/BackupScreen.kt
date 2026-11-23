@@ -20,6 +20,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Login
+import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.CloudOff
@@ -29,8 +31,6 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.FolderOpen
-import androidx.compose.material.icons.filled.Login
-import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Share
@@ -49,11 +49,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
+import androidx.credentials.CredentialManager
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.cloud.SyncConnectionState
+import com.example.ui.auth.UserProfileAvatar
+import com.example.ui.auth.onGoogleSignInClicked
 import com.example.ui.auth.signOutFromCloudSync
 import com.example.ui.components.madrasaCardBorder
 import com.example.ui.theme.MadrasaAccent
+import com.example.ui.theme.MadrasaGold
 import com.example.ui.theme.MadrasaGreen
 import com.example.ui.theme.MadrasaPrimary
 import com.example.ui.theme.MadrasaRed
@@ -71,6 +75,7 @@ import com.google.android.gms.common.api.CommonStatusCodes
 import com.google.android.gms.common.api.Scope
 import com.google.firebase.Firebase
 import com.google.firebase.FirebaseApp
+import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.OAuthCredential
 import com.google.firebase.auth.OAuthProvider
 import com.google.firebase.auth.auth
@@ -235,9 +240,11 @@ private suspend fun authorizeDriveResult(
 
 @Composable
 fun BackupScreen(
-    viewModel: MadrasaViewModel
+    viewModel: MadrasaViewModel,
+    currentUser: FirebaseUser? = Firebase.auth.currentUser
 ) {
     val context = LocalContext.current
+    val credentialManager = remember(context) { CredentialManager.create(context) }
     val clipboardManager = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
     val appSha1 = remember { getAppSigningSha1(context) }
@@ -1089,6 +1096,7 @@ fun BackupScreen(
 
     val syncStatus by viewModel.syncStatus.collectAsStateWithLifecycle()
     var isManualCloudSyncing by remember { mutableStateOf(false) }
+    var isSigningInAccount by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -1097,7 +1105,7 @@ fun BackupScreen(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // Multi-Device Live Cloud Sync Card (Firestore + Google Auth)
+        // Account / Profile & Multi-Device Live Cloud Sync Card (Guest View vs Logged-In Profile)
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(16.dp),
@@ -1106,210 +1114,305 @@ fun BackupScreen(
             elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
         ) {
             Column(modifier = Modifier.padding(18.dp)) {
-                val (badgeColor, badgeLabel) = when (syncStatus.state) {
-                    SyncConnectionState.LIVE -> MadrasaGreen to "লাইভ সিঙ্ক চালু"
-                    SyncConnectionState.SYNCING -> MadrasaSapphire to "সিঙ্ক হচ্ছে..."
-                    SyncConnectionState.OFFLINE_PENDING -> Color(0xFFD97706) to "অফলাইন / অপেক্ষমাণ"
-                    SyncConnectionState.ERROR -> MadrasaRed to "সিঙ্ক ত্রুটি"
-                    SyncConnectionState.IDLE -> MaterialTheme.colorScheme.onSurfaceVariant to "প্রস্তুত"
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+                if (currentUser == null) {
                     Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(42.dp)
-                                .clip(CircleShape)
-                                .background(badgeColor.copy(alpha = 0.15f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.CloudSync,
-                                contentDescription = null,
-                                tint = badgeColor,
-                                modifier = Modifier.size(22.dp)
-                            )
-                        }
+                        UserProfileAvatar(
+                            photoUrl = null,
+                            size = 54.dp,
+                            borderColor = MadrasaGold,
+                            tint = MaterialTheme.colorScheme.primary,
+                            contentDescription = "Guest User"
+                        )
                         Spacer(modifier = Modifier.width(12.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "মাল্টি-ডিভাইস লাইভ ক্লাউড সিঙ্ক",
-                                fontSize = 15.5.sp,
+                                text = "Offline Mode (অফলাইন ও অতিথি মোড)",
+                                fontSize = 16.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.primary
                             )
                             Text(
-                                text = if (syncStatus.userEmail.isNotBlank()) {
-                                    "অ্যাকাউন্ট: ${syncStatus.userEmail}"
-                                } else {
-                                    "M PRO Cloud Sync"
-                                },
+                                text = "লগইন ছাড়াই সব ডেটা এন্ট্রি, এডিট, ডিলিট ও ব্যাকআপ/রিস্টোর চালু আছে",
                                 fontSize = 12.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                color = MadrasaGreen,
+                                fontWeight = FontWeight.Medium
                             )
                         }
                     }
+
+                    Spacer(modifier = Modifier.height(10.dp))
 
                     Surface(
-                        shape = RoundedCornerShape(999.dp),
-                        color = badgeColor.copy(alpha = 0.14f),
-                        border = BorderStroke(1.dp, badgeColor.copy(alpha = 0.45f))
-                    ) {
-                        Text(
-                            text = badgeLabel,
-                            color = badgeColor,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp)
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                Surface(
-                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.38f),
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.padding(11.dp)) {
-                        Text(
-                            text = syncStatus.message,
-                            fontSize = 12.5.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        if (syncStatus.lastSyncedTime.isNotBlank()) {
-                            Spacer(modifier = Modifier.height(3.dp))
-                            Text(
-                                text = "সর্বশেষ সিঙ্ক: ${syncStatus.lastSyncedTime}",
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Row(verticalAlignment = Alignment.Top) {
-                            Icon(
-                                imageVector = Icons.Default.Devices,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier
-                                    .padding(top = 2.dp)
-                                    .size(15.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "অন্য মোবাইলে এই অ্যাপ ইনস্টল করে একই Google অ্যাকাউন্ট (${syncStatus.userEmail.ifBlank { "আপনার ইমেইল" }}) দিয়ে লগইন করলে সাথে সাথে বা কয়েকদিন পরেও সব ডেটা স্বয়ংক্রিয়ভাবে দেখা ও এডিট করা যাবে।",
-                                fontSize = 11.5.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                lineHeight = 16.sp
-                            )
-                        }
-                    }
-                }
-
-                if (!syncStatus.errorMessage.isNullOrBlank()) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Surface(
-                        color = MadrasaRed.copy(alpha = 0.1f),
+                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.42f),
                         shape = RoundedCornerShape(10.dp),
-                        border = BorderStroke(1.dp, MadrasaRed.copy(alpha = 0.35f)),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(
-                            text = syncStatus.errorMessage ?: "",
-                            fontSize = 11.5.sp,
-                            color = MadrasaRed,
-                            modifier = Modifier.padding(10.dp)
+                            text = "আপনি এখন সম্পূর্ণ অফলাইনেই সকল কাজ এবং স্থানীয় ব্যাকআপ ও রিস্টোর করতে পারবেন। অন্য মোবাইলের সাথে লাইভ ক্লাউড সিঙ্ক চালু করতে চাইলে Google অ্যাকাউন্ট দিয়ে সাইন ইন করুন।",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            lineHeight = 17.sp,
+                            modifier = Modifier.padding(11.dp)
                         )
                     }
-                }
 
-                Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
                     Button(
                         onClick = {
-                            if (isManualCloudSyncing) return@Button
-                            isManualCloudSyncing = true
-                            scope.launch {
-                                val res = viewModel.syncNow()
-                                isManualCloudSyncing = false
-                                res.onSuccess { count ->
+                            if (isSigningInAccount) return@Button
+                            isSigningInAccount = true
+                            onGoogleSignInClicked(
+                                context = context,
+                                credentialManager = credentialManager,
+                                onAuthSuccess = {
+                                    isSigningInAccount = false
+                                    val user = Firebase.auth.currentUser
+                                    viewModel.updateAuthUser(user)
                                     Toast.makeText(
                                         context,
-                                        "$count টি রেকর্ড ক্লাউডে সিঙ্ক সম্পন্ন হয়েছে!",
-                                        Toast.LENGTH_LONG
+                                        "সফলভাবে লগইন সম্পন্ন হয়েছে (${user?.email ?: ""})",
+                                        Toast.LENGTH_SHORT
                                     ).show()
-                                }.onFailure { err ->
-                                    Toast.makeText(
-                                        context,
-                                        "সিঙ্ক ত্রুটি: ${err.message ?: "ইন্টারনেট সংযোগ পরীক্ষা করুন"}",
-                                        Toast.LENGTH_LONG
-                                    ).show()
+                                },
+                                onAuthError = { msg ->
+                                    isSigningInAccount = false
+                                    Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                                },
+                                scope = scope,
+                                onAuthCancelled = {
+                                    isSigningInAccount = false
                                 }
-                            }
+                            )
                         },
-                        enabled = !isManualCloudSyncing,
-                        colors = ButtonDefaults.buttonColors(containerColor = MadrasaPrimary),
+                        enabled = !isSigningInAccount,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MadrasaPrimary,
+                            contentColor = Color.White
+                        ),
                         shape = RoundedCornerShape(10.dp),
                         modifier = Modifier
-                            .weight(1f)
+                            .fillMaxWidth()
                             .heightIn(min = 48.dp)
-                            .testTag("cloud_sync_now_button")
+                            .testTag("account_google_sign_in_button")
                     ) {
-                        if (isManualCloudSyncing) {
+                        if (isSigningInAccount) {
                             CircularProgressIndicator(
-                                modifier = Modifier.size(16.dp),
+                                modifier = Modifier.size(18.dp),
                                 color = Color.White,
                                 strokeWidth = 2.dp
                             )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("সিঙ্ক হচ্ছে...", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("সাইন ইন হচ্ছে...", fontSize = 14.sp, fontWeight = FontWeight.Bold)
                         } else {
                             Icon(
-                                imageVector = Icons.Default.Sync,
+                                imageVector = Icons.AutoMirrored.Filled.Login,
                                 contentDescription = null,
-                                modifier = Modifier.size(17.dp)
+                                modifier = Modifier.size(18.dp)
                             )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("এখনই সিঙ্ক করুন", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Sign in with Google", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                } else {
+                    val (badgeColor, badgeLabel) = when (syncStatus.state) {
+                        SyncConnectionState.LIVE -> MadrasaGreen to "লাইভ সিঙ্ক চালু"
+                        SyncConnectionState.SYNCING -> MadrasaSapphire to "সিঙ্ক হচ্ছে..."
+                        SyncConnectionState.OFFLINE_PENDING -> Color(0xFFD97706) to "অফলাইন / অপেক্ষমাণ"
+                        SyncConnectionState.ERROR -> MadrasaRed to "সিঙ্ক ত্রুটি"
+                        SyncConnectionState.IDLE -> MaterialTheme.colorScheme.onSurfaceVariant to "প্রস্তুত"
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            UserProfileAvatar(
+                                photoUrl = currentUser.photoUrl,
+                                size = 50.dp,
+                                borderColor = MadrasaGold,
+                                borderWidth = 2.dp,
+                                tint = MaterialTheme.colorScheme.primary,
+                                contentDescription = currentUser.displayName ?: "Profile"
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = currentUser.displayName?.takeIf { it.isNotBlank() } ?: "M PRO Account",
+                                    fontSize = 15.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Text(
+                                    text = currentUser.email ?: syncStatus.userEmail,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(999.dp),
+                            color = badgeColor.copy(alpha = 0.14f),
+                            border = BorderStroke(1.dp, badgeColor.copy(alpha = 0.45f))
+                        ) {
+                            Text(
+                                text = badgeLabel,
+                                color = badgeColor,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp)
+                            )
                         }
                     }
 
-                    OutlinedButton(
-                        onClick = {
-                            signOutFromCloudSync(
-                                context = context,
-                                scope = scope,
-                                beforeSignOut = { viewModel.stopCloudSync() }
-                            )
-                        },
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Surface(
+                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.38f),
                         shape = RoundedCornerShape(10.dp),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = MadrasaRed),
-                        border = BorderStroke(1.dp, MadrasaRed.copy(alpha = 0.5f)),
-                        modifier = Modifier
-                            .heightIn(min = 48.dp)
-                            .testTag("cloud_sync_sign_out_button")
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Logout,
-                            contentDescription = "লগআউট",
-                            modifier = Modifier.size(17.dp)
-                        )
-                        Spacer(modifier = Modifier.width(5.dp))
-                        Text("লগআউট", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        Column(modifier = Modifier.padding(11.dp)) {
+                            Text(
+                                text = syncStatus.message,
+                                fontSize = 12.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            if (syncStatus.lastSyncedTime.isNotBlank()) {
+                                Spacer(modifier = Modifier.height(3.dp))
+                                Text(
+                                    text = "সর্বশেষ সিঙ্ক: ${syncStatus.lastSyncedTime}",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Row(verticalAlignment = Alignment.Top) {
+                                Icon(
+                                    imageVector = Icons.Default.Devices,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier
+                                        .padding(top = 2.dp)
+                                        .size(15.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "অন্য মোবাইলে এই অ্যাপ ইনস্টল করে একই Google অ্যাকাউন্ট (${currentUser.email ?: syncStatus.userEmail}) দিয়ে লগইন করলে সাথে সাথে বা কয়েকদিন পরেও সব ডেটা স্বয়ংক্রিয়ভাবে দেখা ও এডিট করা যাবে।",
+                                    fontSize = 11.5.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    lineHeight = 16.sp
+                                )
+                            }
+                        }
+                    }
+
+                    if (!syncStatus.errorMessage.isNullOrBlank()) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Surface(
+                            color = MadrasaRed.copy(alpha = 0.1f),
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(1.dp, MadrasaRed.copy(alpha = 0.35f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = syncStatus.errorMessage ?: "",
+                                fontSize = 11.5.sp,
+                                color = MadrasaRed,
+                                modifier = Modifier.padding(10.dp)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = {
+                                if (isManualCloudSyncing) return@Button
+                                isManualCloudSyncing = true
+                                scope.launch {
+                                    val res = viewModel.syncNow()
+                                    isManualCloudSyncing = false
+                                    res.onSuccess { count ->
+                                        Toast.makeText(
+                                            context,
+                                            "$count টি রেকর্ড ক্লাউডে সিঙ্ক সম্পন্ন হয়েছে!",
+                                            Toast.LENGTH_LONG
+                                        ).show()
+                                    }.onFailure { err ->
+                                        Toast.makeText(
+                                            context,
+                                            "সিঙ্ক ত্রুটি: ${err.message ?: "ইন্টারনেট সংযোগ পরীক্ষা করুন"}",
+                                            Toast.LENGTH_LONG
+                                        ).show()
+                                    }
+                                }
+                            },
+                            enabled = !isManualCloudSyncing,
+                            colors = ButtonDefaults.buttonColors(containerColor = MadrasaPrimary),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .heightIn(min = 48.dp)
+                                .testTag("cloud_sync_now_button")
+                        ) {
+                            if (isManualCloudSyncing) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    color = Color.White,
+                                    strokeWidth = 2.dp
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("সিঙ্ক হচ্ছে...", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            } else {
+                                Icon(
+                                    imageVector = Icons.Default.Sync,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(17.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("এখনই সিঙ্ক করুন", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+
+                        OutlinedButton(
+                            onClick = {
+                                signOutFromCloudSync(
+                                    context = context,
+                                    scope = scope,
+                                    beforeSignOut = { viewModel.stopCloudSync() }
+                                )
+                            },
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = MadrasaRed),
+                            border = BorderStroke(1.dp, MadrasaRed.copy(alpha = 0.5f)),
+                            modifier = Modifier
+                                .heightIn(min = 48.dp)
+                                .testTag("cloud_sync_sign_out_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.Logout,
+                                contentDescription = "লগআউট",
+                                modifier = Modifier.size(17.dp)
+                            )
+                            Spacer(modifier = Modifier.width(5.dp))
+                            Text("Logout", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        }
                     }
                 }
             }
@@ -1526,7 +1629,7 @@ fun BackupScreen(
                                     strokeWidth = 2.dp
                                 )
                             } else {
-                                Icon(Icons.Default.Login, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Icon(Icons.AutoMirrored.Filled.Login, contentDescription = null, modifier = Modifier.size(18.dp))
                             }
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
