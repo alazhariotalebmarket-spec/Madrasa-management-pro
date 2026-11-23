@@ -19,11 +19,14 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.data.entity.AttendanceEntity
 import com.example.data.entity.StudentEntity
 import com.example.ui.components.MadrasaEmptyState
 import com.example.ui.components.madrasaCardBorder
 import com.example.ui.theme.MadrasaGreen
 import com.example.ui.theme.MadrasaPrimary
+import kotlinx.coroutines.flow.Flow
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -31,6 +34,7 @@ import java.util.*
 @Composable
 fun AttendanceScreen(
     students: List<StudentEntity>,
+    getAttendanceForDate: (String) -> Flow<List<AttendanceEntity>>,
     onSaveAttendance: (String, Map<Int, String>) -> Unit
 ) {
     val context = LocalContext.current
@@ -45,9 +49,21 @@ fun AttendanceScreen(
         listOf("সকল শ্রেণী") + students.map { it.cls }.distinct().filter { it.isNotBlank() }
     }
 
-    LaunchedEffect(students) {
+    val savedAttendance by remember(selectedDate) {
+        getAttendanceForDate(selectedDate)
+    }.collectAsStateWithLifecycle(initialValue = emptyList())
+
+    LaunchedEffect(selectedDate) {
+        attendanceState.clear()
+    }
+
+    LaunchedEffect(selectedDate, savedAttendance, students) {
+        val savedMap = savedAttendance.associate { it.studentId to it.status }
         students.forEach { s ->
-            if (!attendanceState.containsKey(s.id)) {
+            val persisted = savedMap[s.id]
+            if (persisted != null) {
+                attendanceState[s.id] = persisted
+            } else if (!attendanceState.containsKey(s.id)) {
                 attendanceState[s.id] = "উপস্থিত"
             }
         }

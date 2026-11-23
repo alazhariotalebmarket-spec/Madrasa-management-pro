@@ -1,0 +1,277 @@
+{
+  "entities": {
+    "InstitutionProfile": {
+      "title": "InstitutionProfile",
+      "description": "Madrasa name, address, phone, and compact round logo Base64 synced across devices.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Owner Firebase Auth UID"
+        },
+        "name": {
+          "type": "string",
+          "description": "Madrasa name"
+        },
+        "address": {
+          "type": "string",
+          "description": "Madrasa address"
+        },
+        "phone": {
+          "type": "string",
+          "description": "Madrasa contact phone"
+        },
+        "logoBase64": {
+          "type": "string",
+          "description": "Compact Base64 encoded round Madrasa logo"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation timestamp (FieldValue.serverTimestamp())"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last update timestamp (FieldValue.serverTimestamp())"
+        }
+      },
+      "required": ["userId", "name", "address", "phone", "logoBase64", "createdAt", "updatedAt"]
+    },
+    "Student": {
+      "title": "Student",
+      "description": "Enrolled student record synced across devices.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "localId": { "type": "integer" },
+        "name": { "type": "string" },
+        "father": { "type": "string" },
+        "phone": { "type": "string" },
+        "cls": { "type": "string" },
+        "fee": { "type": "number" },
+        "photoUri": { "type": "string" },
+        "roll": { "type": "string" },
+        "electricBill": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "localId", "name", "father", "phone", "cls", "fee", "photoUri", "roll", "electricBill", "createdAt", "updatedAt"]
+    },
+    "Fee": {
+      "title": "Fee",
+      "description": "Student fee and electricity bill payment receipt.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "localId": { "type": "integer" },
+        "studentId": { "type": "integer" },
+        "amount": { "type": "number" },
+        "type": { "type": "string" },
+        "month": { "type": "string" },
+        "date": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "localId", "studentId", "amount", "type", "month", "date", "createdAt", "updatedAt"]
+    },
+    "Attendance": {
+      "title": "Attendance",
+      "description": "Daily student attendance entry.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "localId": { "type": "integer" },
+        "date": { "type": "string" },
+        "studentId": { "type": "integer" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "localId", "date", "studentId", "status", "createdAt", "updatedAt"]
+    },
+    "SubjectMark": {
+      "title": "SubjectMark",
+      "description": "Single subject mark inside an exam result.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "mark": { "type": "number" }
+      },
+      "required": ["name", "mark"]
+    },
+    "Result": {
+      "title": "Result",
+      "description": "Student exam result with native subjects list.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "localId": { "type": "integer" },
+        "studentId": { "type": "integer" },
+        "exam": { "type": "string" },
+        "subjects": {
+          "type": "array",
+          "description": "List of SubjectMark objects"
+        },
+        "total": { "type": "number" },
+        "avg": { "type": "number" },
+        "date": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "localId", "studentId", "exam", "subjects", "total", "avg", "date", "createdAt", "updatedAt"]
+    },
+    "Teacher": {
+      "title": "Teacher",
+      "description": "Madrasa teacher record.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "localId": { "type": "integer" },
+        "name": { "type": "string" },
+        "subject": { "type": "string" },
+        "salary": { "type": "number" },
+        "address": { "type": "string" },
+        "phone": { "type": "string" },
+        "photoUri": { "type": "string" },
+        "joinDate": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "localId", "name", "subject", "salary", "address", "phone", "photoUri", "joinDate", "createdAt", "updatedAt"]
+    },
+    "TeacherPayment": {
+      "title": "TeacherPayment",
+      "description": "Teacher salary disbursement record.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "localId": { "type": "integer" },
+        "teacherId": { "type": "integer" },
+        "amount": { "type": "number" },
+        "month": { "type": "string" },
+        "year": { "type": "string" },
+        "date": { "type": "string" },
+        "note": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "localId", "teacherId", "amount", "month", "year", "date", "note", "createdAt", "updatedAt"]
+    },
+    "Expense": {
+      "title": "Expense",
+      "description": "Madrasa expense or Muhtamim deposit entry.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "localId": { "type": "integer" },
+        "type": { "type": "string" },
+        "desc": { "type": "string" },
+        "amount": { "type": "number" },
+        "date": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "localId", "type", "desc", "amount", "date", "createdAt", "updatedAt"]
+    },
+    "Notice": {
+      "title": "Notice",
+      "description": "Notice board announcement.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "localId": { "type": "integer" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "date": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "localId", "title", "description", "date", "createdAt", "updatedAt"]
+    },
+    "QuestionPaper": {
+      "title": "QuestionPaper",
+      "description": "Saved exam question paper.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "localId": { "type": "integer" },
+        "examName": { "type": "string" },
+        "className": { "type": "string" },
+        "subject": { "type": "string" },
+        "fullMarks": { "type": "string" },
+        "duration": { "type": "string" },
+        "instructions": { "type": "string" },
+        "questionsText": { "type": "string" },
+        "date": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "localId", "examName", "className", "subject", "fullMarks", "duration", "instructions", "questionsText", "date", "createdAt", "updatedAt"]
+    },
+    "ClassRoutine": {
+      "title": "ClassRoutine",
+      "description": "Annual class routine period entry.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "localId": { "type": "integer" },
+        "className": { "type": "string" },
+        "dayOfWeek": { "type": "string" },
+        "timeSlot": { "type": "string" },
+        "subject": { "type": "string" },
+        "teacherName": { "type": "string" },
+        "duration": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "localId", "className", "dayOfWeek", "timeSlot", "subject", "teacherName", "duration", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}/institution/{docId}": {
+      "schema": { "$ref": "#/entities/InstitutionProfile" },
+      "description": "Institution settings and round logo synced across the owner's devices."
+    },
+    "/users/{userId}/students/{studentDocId}": {
+      "schema": { "$ref": "#/entities/Student" },
+      "description": "User-scoped student records."
+    },
+    "/users/{userId}/fees/{feeDocId}": {
+      "schema": { "$ref": "#/entities/Fee" },
+      "description": "User-scoped fee receipts."
+    },
+    "/users/{userId}/attendance/{attendanceDocId}": {
+      "schema": { "$ref": "#/entities/Attendance" },
+      "description": "User-scoped daily attendance entries."
+    },
+    "/users/{userId}/results/{resultDocId}": {
+      "schema": { "$ref": "#/entities/Result" },
+      "description": "User-scoped exam results."
+    },
+    "/users/{userId}/teachers/{teacherDocId}": {
+      "schema": { "$ref": "#/entities/Teacher" },
+      "description": "User-scoped teacher profiles."
+    },
+    "/users/{userId}/teacherPayments/{paymentDocId}": {
+      "schema": { "$ref": "#/entities/TeacherPayment" },
+      "description": "User-scoped teacher salary payment records."
+    },
+    "/users/{userId}/expenses/{expenseDocId}": {
+      "schema": { "$ref": "#/entities/Expense" },
+      "description": "User-scoped expense and Muhtamim deposit entries."
+    },
+    "/users/{userId}/notices/{noticeDocId}": {
+      "schema": { "$ref": "#/entities/Notice" },
+      "description": "User-scoped notice board announcements."
+    },
+    "/users/{userId}/questionPapers/{paperDocId}": {
+      "schema": { "$ref": "#/entities/QuestionPaper" },
+      "description": "User-scoped question papers."
+    },
+    "/users/{userId}/classRoutines/{routineDocId}": {
+      "schema": { "$ref": "#/entities/ClassRoutine" },
+      "description": "User-scoped annual class routines."
+    }
+  }
+}

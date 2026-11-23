@@ -29,6 +29,7 @@ import com.example.data.MadrasaInfo
 import com.example.data.entity.StudentEntity
 import com.example.data.entity.TeacherEntity
 import com.example.ui.components.MadrasaEmptyState
+import com.example.ui.components.MadrasaRoundLogo
 import com.example.ui.components.madrasaCardBorder
 import com.example.ui.theme.MadrasaContainer
 import com.example.ui.theme.MadrasaGold
@@ -425,12 +426,10 @@ fun TeacherIdCardDialog(
                         contentAlignment = Alignment.Center
                     ) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Image(
-                                painter = painterResource(id = R.drawable.madrasa_logo_round),
-                                contentDescription = "মাদ্রাসা লোগো",
-                                modifier = Modifier
-                                    .size(44.dp)
-                                    .clip(CircleShape)
+                            MadrasaRoundLogo(
+                                logoPath = madrasaInfo.logoPath,
+                                size = 46.dp,
+                                borderWidth = 1.5.dp
                             )
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(

@@ -123,33 +123,41 @@ object PdfPrintUtil {
     }
 
     private fun loadHighResMadrasaLogo(context: Context, maxPx: Int = 512): Bitmap? {
-        return try {
-            val opts = BitmapFactory.Options().apply { inScaled = false }
-            val src = BitmapFactory.decodeResource(context.resources, R.drawable.madrasa_logo_round, opts)
-                ?: return null
-            if (src.width > maxPx || src.height > maxPx) {
-                val scaled = Bitmap.createScaledBitmap(src, maxPx, maxPx, true)
-                if (scaled != src) src.recycle()
-                scaled
-            } else {
-                src
-            }
-        } catch (_: Throwable) {
-            null
-        }
+        return MadrasaLogoUtil.loadCircularLogoBitmap(
+            context = context,
+            logoPath = MadrasaInfoStore.getInfo(context).logoPath,
+            targetSizePx = maxPx
+        )
     }
 
     private fun loadMadrasaLogo(context: Context, sizePx: Int): Bitmap? {
-        return try {
-            val opts = BitmapFactory.Options().apply { inScaled = false }
-            val src = BitmapFactory.decodeResource(context.resources, R.drawable.madrasa_logo_round, opts)
-                ?: return null
-            val scaled = Bitmap.createScaledBitmap(src, sizePx, sizePx, true)
-            if (scaled != src) src.recycle()
-            scaled
-        } catch (_: Throwable) {
-            null
+        return MadrasaLogoUtil.loadCircularLogoBitmap(
+            context = context,
+            logoPath = MadrasaInfoStore.getInfo(context).logoPath,
+            targetSizePx = sizePx
+        )
+    }
+
+    private fun drawCircularLogoWithRing(
+        canvas: Canvas,
+        logoBmp: Bitmap,
+        left: Float,
+        top: Float,
+        size: Float,
+        ringStrokeWidth: Float = 1.4f
+    ) {
+        canvas.drawBitmap(
+            logoBmp,
+            null,
+            RectF(left, top, left + size, top + size),
+            highQualityBitmapPaint
+        )
+        val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = 0xFFD4AF37.toInt()
+            style = Paint.Style.STROKE
+            strokeWidth = ringStrokeWidth
         }
+        canvas.drawCircle(left + size / 2f, top + size / 2f, size / 2f, ringPaint)
     }
 
     private fun openPhotoInputStream(context: Context, photoUriStr: String): InputStream? {
@@ -328,7 +336,7 @@ object PdfPrintUtil {
             if (logoBmp != null) {
                 val logoLeft = LEFT + 10f
                 val logoTop = headerTop + (headerHeight - 48f) / 2f
-                canvas.drawBitmap(logoBmp, null, RectF(logoLeft, logoTop, logoLeft + 48f, logoTop + 48f), highQualityBitmapPaint)
+                drawCircularLogoWithRing(canvas, logoBmp, logoLeft, logoTop, 48f, 1.3f)
             }
 
             var ty = headerTop + 10f
@@ -1085,11 +1093,11 @@ object PdfPrintUtil {
         val madrasaInfo = MadrasaInfoStore.getInfo(context)
 
         // Madrasa Logo + Header Texts (Strictly inside safe area!)
-        val logoBmp = loadHighResMadrasaLogo(context, 360)
+        val logoBmp = loadHighResMadrasaLogo(context, 420)
         if (logoBmp != null) {
             val logoLeft = (w - 92f) / 2f
             val logoTop = bleed + 14f
-            canvas.drawBitmap(logoBmp, null, RectF(logoLeft, logoTop, logoLeft + 92f, logoTop + 92f), highQualityBitmapPaint)
+            drawCircularLogoWithRing(canvas, logoBmp, logoLeft, logoTop, 92f, 2.5f)
             try { logoBmp.recycle() } catch (_: Exception) {}
         }
 
@@ -1773,7 +1781,7 @@ object PdfPrintUtil {
                     if (logoBmp != null) {
                         val logoLeft = colLeft + 8f
                         val logoTop = y + (headerBoxH - 36f) / 2f
-                        canvas.drawBitmap(logoBmp, null, RectF(logoLeft, logoTop, logoLeft + 36f, logoTop + 36f), highQualityBitmapPaint)
+                        drawCircularLogoWithRing(canvas, logoBmp, logoLeft, logoTop, 36f, 1.1f)
                     }
                     var ty = y + 7f
                     canvas.drawLayoutAt(titleLayout, headerTextStart, ty)

@@ -95,7 +95,7 @@ fun DeveloperScreen(onBack: () -> Unit) {
                     shape = RoundedCornerShape(12.dp)
                 ) {
                     Text(
-                        text = "মাদ্রাসা ম্যানেজমেন্ট প্রো • ভার্সন ১.০",
+                        text = "M PRO • ভার্সন ১.০",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = MadrasaAccent,

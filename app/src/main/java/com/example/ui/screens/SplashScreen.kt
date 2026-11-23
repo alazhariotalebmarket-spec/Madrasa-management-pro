@@ -44,6 +44,7 @@ import com.example.R
 import com.example.data.MadrasaInfo
 import com.example.ui.components.IslamicPatternOverlay
 import com.example.ui.components.MadrasaHeaderGradient
+import com.example.ui.components.MadrasaRoundLogo
 import com.example.ui.theme.MadrasaGold
 import com.example.ui.theme.MadrasaSky
 import kotlinx.coroutines.delay
@@ -119,28 +120,20 @@ fun MadrasaSplashOverlay(
                         }
                 ) {}
 
-                Surface(
-                    shape = CircleShape,
-                    color = Color.Black,
-                    border = BorderStroke(3.dp, MadrasaGold),
+                MadrasaRoundLogo(
+                    logoPath = madrasaInfo.logoPath,
+                    size = 164.dp,
+                    borderWidth = 3.dp,
+                    borderColor = MadrasaGold,
                     shadowElevation = 14.dp,
-                    modifier = Modifier
-                        .size(164.dp)
-                        .graphicsLayer {
-                            scaleX = emblemScale.value
-                            scaleY = emblemScale.value
-                            alpha = emblemAlpha.value
-                        }
-                ) {
-                    Image(
-                        painter = painterResource(id = R.drawable.splash_ishaqia_emblem),
-                        contentDescription = "ইসহাকিয়া মাদ্রাসা ওপেনিং লোগো",
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .clip(CircleShape)
-                    )
-                }
+                    fallbackResId = R.drawable.img_mpro_emblem,
+                    contentDescription = "M PRO ওপেনিং লোগো",
+                    modifier = Modifier.graphicsLayer {
+                        scaleX = emblemScale.value
+                        scaleY = emblemScale.value
+                        alpha = emblemAlpha.value
+                    }
+                )
             }
 
             Spacer(modifier = Modifier.height(26.dp))

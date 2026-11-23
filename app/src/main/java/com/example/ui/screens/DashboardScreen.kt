@@ -2,12 +2,15 @@ package com.example.ui.screens
 
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import java.util.concurrent.Executors
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -36,15 +39,20 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
-import com.example.R
 import com.example.data.MadrasaInfo
+import com.example.data.cloud.CloudSyncStatus
+import com.example.data.cloud.SyncConnectionState
 import com.example.data.entity.FeeEntity
 import com.example.data.entity.StudentEntity
+import com.example.ui.components.ImageCropperDialog
 import com.example.ui.components.IslamicPatternOverlay
 import com.example.ui.components.MadrasaHeaderGradient
+import com.example.ui.components.MadrasaRoundLogo
 import com.example.ui.components.madrasaCardBorder
 import com.example.ui.theme.MadrasaGold
+import com.example.ui.theme.MadrasaGreen
 import com.example.ui.theme.MadrasaPrimary
+import com.example.ui.theme.MadrasaRed
 import com.example.ui.theme.MadrasaSapphire
 import com.example.ui.theme.MadrasaSky
 import com.example.util.PdfPrintUtil
@@ -64,11 +72,26 @@ fun DashboardScreen(
     students: List<StudentEntity>,
     fees: List<FeeEntity>,
     madrasaInfo: MadrasaInfo,
-    onUpdateMadrasaInfo: (String, String, String) -> Unit,
+    syncStatus: CloudSyncStatus = CloudSyncStatus(),
+    onUpdateMadrasaInfo: (String, String, String, String?) -> Unit,
+    onUpdateMadrasaLogo: (String) -> Unit,
     onNavigate: (String) -> Unit
 ) {
     val context = LocalContext.current
     var showEditInfoDialog by remember { mutableStateOf(false) }
+    var pendingCropUri by remember { mutableStateOf<Uri?>(null) }
+    var cropFromEditDialog by remember { mutableStateOf(false) }
+    var dialogLogoPath by remember(madrasaInfo.logoPath, showEditInfoDialog) {
+        mutableStateOf(madrasaInfo.logoPath)
+    }
+
+    val logoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null) {
+            pendingCropUri = uri
+        }
+    }
 
     val menuItems = remember {
         listOf(
@@ -117,23 +140,46 @@ fun DashboardScreen(
                             .padding(horizontal = 14.dp, vertical = 16.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // Left: Circular Madrasa Logo framed in Warm Gold
-                        Surface(
-                            shape = CircleShape,
-                            color = Color.White,
-                            border = BorderStroke(2.dp, MadrasaGold.copy(alpha = 0.88f)),
-                            shadowElevation = 6.dp,
-                            modifier = Modifier.size(66.dp)
+                        // Left: Editable Circular Madrasa Logo framed in Warm Gold with edit badge
+                        Box(
+                            modifier = Modifier
+                                .size(68.dp)
+                                .clip(CircleShape)
+                                .clickable {
+                                    cropFromEditDialog = false
+                                    logoPickerLauncher.launch(
+                                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                    )
+                                }
+                                .testTag("dashboard_logo_edit_button"),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Image(
-                                painter = painterResource(id = R.drawable.madrasa_logo_round),
-                                contentDescription = "ইসহাকিয়া মাদ্রাসা লোগো",
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(2.dp)
-                                    .clip(CircleShape)
+                            MadrasaRoundLogo(
+                                logoPath = madrasaInfo.logoPath,
+                                size = 66.dp,
+                                borderWidth = 2.dp,
+                                borderColor = MadrasaGold.copy(alpha = 0.9f),
+                                shadowElevation = 6.dp,
+                                contentDescription = "মাদ্রাসা লোগো পরিবর্তন করুন"
                             )
+                            Surface(
+                                shape = CircleShape,
+                                color = MadrasaGold,
+                                border = BorderStroke(1.5.dp, Color.White),
+                                shadowElevation = 2.dp,
+                                modifier = Modifier
+                                    .align(Alignment.BottomEnd)
+                                    .size(22.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Default.CameraAlt,
+                                        contentDescription = "লোগো পরিবর্তন",
+                                        tint = Color(0xFF063D23),
+                                        modifier = Modifier.size(12.dp)
+                                    )
+                                }
+                            }
                         }
 
                         Spacer(modifier = Modifier.width(12.dp))
@@ -238,19 +284,64 @@ fun DashboardScreen(
                                         ) {
                                             Icon(
                                                 imageVector = Icons.Default.CloudUpload,
-                                                contentDescription = "ব্যাকআপ",
+                                                contentDescription = "ব্যাকআপ ও সিঙ্ক",
                                                 tint = MadrasaSky,
                                                 modifier = Modifier.size(13.dp)
                                             )
                                             Spacer(modifier = Modifier.width(3.dp))
                                             Text(
-                                                text = "ব্যাকআপ",
+                                                text = "সিঙ্ক",
                                                 color = Color.White,
                                                 fontSize = 11.sp,
                                                 fontWeight = FontWeight.SemiBold
                                             )
                                         }
                                     }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(6.dp))
+
+                            val (dotColor, statusBadgeText) = when (syncStatus.state) {
+                                SyncConnectionState.LIVE -> Color(0xFF4ADE80) to "লাইভ সিঙ্ক চালু"
+                                SyncConnectionState.SYNCING -> MadrasaSky to "সিঙ্ক হচ্ছে..."
+                                SyncConnectionState.OFFLINE_PENDING -> MadrasaGold to "অফলাইন (অনলাইন হলে সিঙ্ক হবে)"
+                                SyncConnectionState.ERROR -> Color(0xFFFCA5A5) to "সিঙ্ক সমস্যা"
+                                SyncConnectionState.IDLE -> Color.White.copy(alpha = 0.7f) to "সিঙ্ক প্রস্তুত"
+                            }
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = Color.Black.copy(alpha = 0.22f),
+                                border = BorderStroke(0.8.dp, Color.White.copy(alpha = 0.18f)),
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable { onNavigate("backup") }
+                                    .testTag("dashboard_cloud_sync_pill")
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(7.dp)
+                                            .clip(CircleShape)
+                                            .background(dotColor)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = buildString {
+                                            append(statusBadgeText)
+                                            if (syncStatus.userEmail.isNotBlank()) {
+                                                append(" • ")
+                                                append(syncStatus.userEmail)
+                                            }
+                                        },
+                                        color = Color.White.copy(alpha = 0.92f),
+                                        fontSize = 10.5.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
                                 }
                             }
                         }
@@ -391,13 +482,78 @@ fun DashboardScreen(
             onDismissRequest = { showEditInfoDialog = false },
             title = {
                 Text(
-                    text = "মাদ্রাসার তথ্য সম্পাদনা",
+                    text = "মাদ্রাসার তথ্য ও লোগো সম্পাদনা",
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.primary
                 )
             },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    // Editable Round Logo Row
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                        border = BorderStroke(1.dp, MadrasaGold.copy(alpha = 0.45f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            MadrasaRoundLogo(
+                                logoPath = dialogLogoPath,
+                                size = 64.dp,
+                                borderWidth = 2.dp,
+                                borderColor = MadrasaGold
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "মাদ্রাসার লোগো (রাউন্ড)",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "গোল ক্রপ ও হাই-রেজুলেশন (১০২৪px)",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    OutlinedButton(
+                                        onClick = {
+                                            cropFromEditDialog = true
+                                            logoPickerLauncher.launch(
+                                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                            )
+                                        },
+                                        shape = RoundedCornerShape(8.dp),
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                        modifier = Modifier
+                                            .heightIn(min = 36.dp)
+                                            .testTag("dialog_change_logo_button")
+                                    ) {
+                                        Icon(Icons.Default.PhotoCamera, contentDescription = null, modifier = Modifier.size(15.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("পাল্টান", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                    }
+                                    if (dialogLogoPath.isNotBlank()) {
+                                        TextButton(
+                                            onClick = { dialogLogoPath = "" },
+                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                                            modifier = Modifier.heightIn(min = 36.dp)
+                                        ) {
+                                            Text("ডিফল্ট", fontSize = 12.sp)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     OutlinedTextField(
                         value = nameInput,
                         onValueChange = { nameInput = it },
@@ -439,8 +595,8 @@ fun DashboardScreen(
                             Toast.makeText(context, "নাম, ঠিকানা ও মোবাইল নাম্বার পূরণ করুন", Toast.LENGTH_SHORT).show()
                             return@Button
                         }
-                        onUpdateMadrasaInfo(nameInput, addressInput, phoneInput)
-                        Toast.makeText(context, "মাদ্রাসার তথ্য সংরক্ষণ করা হয়েছে!", Toast.LENGTH_SHORT).show()
+                        onUpdateMadrasaInfo(nameInput, addressInput, phoneInput, dialogLogoPath)
+                        Toast.makeText(context, "মাদ্রাসার তথ্য ও লোগো সংরক্ষণ করা হয়েছে!", Toast.LENGTH_SHORT).show()
                         showEditInfoDialog = false
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = MadrasaPrimary, contentColor = Color.White),
@@ -453,6 +609,29 @@ fun DashboardScreen(
                 TextButton(onClick = { showEditInfoDialog = false }) {
                     Text("বাতিল")
                 }
+            }
+        )
+    }
+
+    pendingCropUri?.let { uri ->
+        ImageCropperDialog(
+            imageUri = uri,
+            title = "🕌 মাদ্রাসার লোগো ক্রপ (রাউন্ড)",
+            subtitle = "গোল বৃত্তের ভেতরে লোগোটি সুন্দরভাবে সেট করুন (১০২৪px হাই-রেস)",
+            initialCircular = true,
+            lockCircularShape = true,
+            outputSizePx = 1024,
+            filePrefix = "madrasa_logo",
+            onCropCompleted = { savedPath ->
+                pendingCropUri = null
+                if (cropFromEditDialog && showEditInfoDialog) {
+                    dialogLogoPath = savedPath
+                } else {
+                    onUpdateMadrasaLogo(savedPath)
+                }
+            },
+            onDismiss = {
+                pendingCropUri = null
             }
         )
     }
@@ -496,7 +675,7 @@ fun downloadApkDirectly(context: Context) {
             val shareIntent = Intent(Intent.ACTION_SEND).apply {
                 type = "application/vnd.android.package-archive"
                 putExtra(Intent.EXTRA_STREAM, shareUri)
-                putExtra(Intent.EXTRA_SUBJECT, "মাদ্রাসা ম্যানেজমেন্ট প্রো (APK)")
+                putExtra(Intent.EXTRA_SUBJECT, "M PRO (APK)")
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
 

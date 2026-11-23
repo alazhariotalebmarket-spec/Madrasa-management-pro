@@ -6,6 +6,7 @@ import android.content.ContextWrapper
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.provider.OpenableColumns
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
@@ -22,13 +23,18 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.CloudOff
+import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Login
+import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -43,11 +49,16 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.data.cloud.SyncConnectionState
+import com.example.ui.auth.signOutFromCloudSync
 import com.example.ui.components.madrasaCardBorder
 import com.example.ui.theme.MadrasaAccent
 import com.example.ui.theme.MadrasaGreen
 import com.example.ui.theme.MadrasaPrimary
 import com.example.ui.theme.MadrasaRed
+import com.example.ui.theme.MadrasaSapphire
+import com.example.ui.viewmodel.BackupRestoreSummary
 import com.example.ui.viewmodel.MadrasaViewModel
 import com.google.android.gms.auth.GoogleAuthUtil
 import com.google.android.gms.auth.UserRecoverableAuthException
@@ -237,6 +248,8 @@ fun BackupScreen(
     val teacherPayments by viewModel.teacherPayments.collectAsState()
     val expenses by viewModel.expenses.collectAsState()
     val notices by viewModel.notices.collectAsState()
+    val questionPapers by viewModel.questionPapers.collectAsState()
+    val classRoutines by viewModel.classRoutines.collectAsState()
     val madrasaInfo by viewModel.madrasaInfo.collectAsState()
 
     val prefs = remember {
@@ -251,6 +264,9 @@ fun BackupScreen(
     var isConnecting by remember { mutableStateOf(false) }
     var isUploading by remember { mutableStateOf(false) }
     var isLoadingDriveFiles by remember { mutableStateOf(false) }
+    var isRestoringFile by remember { mutableStateOf(false) }
+    var lastLocalRestoreStatus by remember { mutableStateOf<String?>(null) }
+    var lastLocalRestoreIsWarning by remember { mutableStateOf(false) }
     var connectionError by remember { mutableStateOf<String?>(null) }
     var showSha1Diagnostic by remember { mutableStateOf(false) }
 
@@ -637,12 +653,6 @@ fun BackupScreen(
             }
             withContext(Dispatchers.Main) {
                 try {
-                    if (FirebaseApp.getApps(context).isNotEmpty()) {
-                        Firebase.auth.signOut()
-                    }
-                } catch (_: Exception) {
-                }
-                try {
                     val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
                         .requestEmail()
                         .requestScopes(Scope(DRIVE_APPDATA_SCOPE))
@@ -666,6 +676,10 @@ fun BackupScreen(
         root.put("institution", madrasaInfo.name)
         root.put("institutionAddress", madrasaInfo.address)
         root.put("institutionPhone", madrasaInfo.phone)
+        val logoBase64 = com.example.util.MadrasaLogoUtil.readLogoAsBase64(madrasaInfo.logoPath)
+        if (logoBase64.isNotBlank()) {
+            root.put("institutionLogoBase64", logoBase64)
+        }
         root.put("backupDate", timeStamp)
 
         val studentsArray = JSONArray()
@@ -770,6 +784,36 @@ fun BackupScreen(
         }
         root.put("notices", noticesArray)
 
+        val papersArray = JSONArray()
+        questionPapers.forEach { q ->
+            papersArray.put(JSONObject().apply {
+                put("id", q.id)
+                put("examName", q.examName)
+                put("className", q.className)
+                put("subject", q.subject)
+                put("fullMarks", q.fullMarks)
+                put("duration", q.duration)
+                put("instructions", q.instructions)
+                put("questionsText", q.questionsText)
+                put("date", q.date)
+            })
+        }
+        root.put("questionPapers", papersArray)
+
+        val routinesArray = JSONArray()
+        classRoutines.forEach { r ->
+            routinesArray.put(JSONObject().apply {
+                put("id", r.id)
+                put("className", r.className)
+                put("dayOfWeek", r.dayOfWeek)
+                put("timeSlot", r.timeSlot)
+                put("subject", r.subject)
+                put("teacherName", r.teacherName)
+                put("duration", r.duration)
+            })
+        }
+        root.put("classRoutines", routinesArray)
+
         return root.toString(2)
     }
 
@@ -833,7 +877,7 @@ fun BackupScreen(
                 driveHttpClient.newCall(uploadReq).execute().use { uploadRes ->
                     val uploadBody = uploadRes.body?.string().orEmpty()
                     if (uploadRes.isSuccessful) {
-                        Result.success("Google Drive (Madrasa M PRO)")
+                        Result.success("Google Drive (M PRO)")
                     } else {
                         val apiMsg = try {
                             JSONObject(uploadBody).optJSONObject("error")?.optString("message") ?: "HTTP ${uploadRes.code}"
@@ -893,7 +937,7 @@ fun BackupScreen(
         }
     }
 
-    suspend fun downloadAndRestoreDriveFile(fileId: String): Result<Int> {
+    suspend fun downloadAndRestoreDriveFile(fileId: String): Result<BackupRestoreSummary> {
         return withContext(Dispatchers.IO) {
             try {
                 val token = getFreshAccessToken()
@@ -919,7 +963,8 @@ fun BackupScreen(
     LaunchedEffect(isGoogleConnected, autoBackupFreq) {
         if (!isGoogleConnected || autoBackupFreq == "বন্ধ" || isUploading) return@LaunchedEffect
         val hasAnyData = students.isNotEmpty() || fees.isNotEmpty() || results.isNotEmpty() ||
-            teachers.isNotEmpty() || expenses.isNotEmpty() || notices.isNotEmpty()
+            teachers.isNotEmpty() || teacherPayments.isNotEmpty() || expenses.isNotEmpty() ||
+            notices.isNotEmpty() || questionPapers.isNotEmpty() || classRoutines.isNotEmpty()
         if (!hasAnyData) return@LaunchedEffect
 
         val intervalMs = when (autoBackupFreq) {
@@ -952,28 +997,68 @@ fun BackupScreen(
     val restoreJsonLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
-        if (uri != null) {
+        if (uri != null && !isRestoringFile) {
+            isRestoringFile = true
             scope.launch {
                 try {
-                    val jsonStr = withContext(Dispatchers.IO) {
-                        context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+                    val (fileName, jsonStr) = withContext(Dispatchers.IO) {
+                        val displayName = try {
+                            context.contentResolver.query(
+                                uri,
+                                arrayOf(OpenableColumns.DISPLAY_NAME),
+                                null,
+                                null,
+                                null
+                            )?.use { cursor ->
+                                val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                                if (cursor.moveToFirst() && idx >= 0) cursor.getString(idx) else null
+                            }
+                        } catch (_: Exception) {
+                            null
+                        } ?: uri.lastPathSegment?.substringAfterLast('/') ?: "Backup.json"
+
+                        val rawText = context.contentResolver.openInputStream(uri)
+                            ?.bufferedReader(Charsets.UTF_8)
+                            ?.use { it.readText() }
+                            ?.trimStart('\uFEFF')
+                        displayName to rawText
                     }
+
                     if (jsonStr.isNullOrBlank()) {
-                        Toast.makeText(context, "ফাইলটি খালি বা পড়া যাচ্ছে না", Toast.LENGTH_SHORT).show()
+                        lastLocalRestoreIsWarning = true
+                        lastLocalRestoreStatus = "নির্বাচিত ফাইলটি ($fileName) খালি বা পড়া যাচ্ছে না।"
+                        Toast.makeText(context, lastLocalRestoreStatus, Toast.LENGTH_SHORT).show()
                         return@launch
                     }
+
                     val res = viewModel.restoreFromBackupJson(jsonStr)
-                    res.onSuccess { count ->
-                        Toast.makeText(
-                            context,
-                            "সফলভাবে $count টি তথ্য রিস্টোর সম্পন্ন হয়েছে!",
-                            Toast.LENGTH_LONG
-                        ).show()
+                    res.onSuccess { summary ->
+                        val statusMsg = when {
+                            summary.isDuplicateFile ->
+                                "এই ফাইলটি ($fileName) আগেই রিস্টোর করা আছে! ${summary.skippedDuplicateCount} টি তথ্য ডাবল হওয়া থেকে সুরক্ষিত রাখা হয়েছে।"
+                            summary.addedOrUpdatedCount == 0 && summary.totalInFile == 0 ->
+                                "$fileName থেকে প্রতিষ্ঠানের তথ্য রিস্টোর হয়েছে (ফাইলে কোনো অতিরিক্ত রেকর্ড নেই)।"
+                            summary.skippedDuplicateCount > 0 ->
+                                "$fileName থেকে ${summary.addedOrUpdatedCount} টি নতুন/আপডেটেড তথ্য রিস্টোর হয়েছে (${summary.skippedDuplicateCount} টি ডুপ্লিকেট এড়ানো হয়েছে)।"
+                            else ->
+                                "$fileName থেকে ${summary.addedOrUpdatedCount} টি তথ্য সফলভাবে রিস্টোর সম্পন্ন হয়েছে!"
+                        }
+                        lastLocalRestoreIsWarning = false
+                        lastLocalRestoreStatus = statusMsg
+                        Toast.makeText(context, statusMsg, Toast.LENGTH_LONG).show()
                     }.onFailure { err ->
-                        Toast.makeText(context, "রিস্টোর ত্রুটি: ${err.message}", Toast.LENGTH_LONG).show()
+                        val errMsg = "রিস্টোর ত্রুটি: ${err.message ?: "ফাইল ফরম্যাট সঠিক নয়"}"
+                        lastLocalRestoreIsWarning = true
+                        lastLocalRestoreStatus = errMsg
+                        Toast.makeText(context, errMsg, Toast.LENGTH_LONG).show()
                     }
                 } catch (e: Exception) {
-                    Toast.makeText(context, "রিস্টোরে ত্রুটি: ${e.message}", Toast.LENGTH_SHORT).show()
+                    val errMsg = "রিস্টোরে ত্রুটি: ${e.message ?: "অজানা সমস্যা"}"
+                    lastLocalRestoreIsWarning = true
+                    lastLocalRestoreStatus = errMsg
+                    Toast.makeText(context, errMsg, Toast.LENGTH_SHORT).show()
+                } finally {
+                    isRestoringFile = false
                 }
             }
         }
@@ -1002,6 +1087,9 @@ fun BackupScreen(
         }
     }
 
+    val syncStatus by viewModel.syncStatus.collectAsStateWithLifecycle()
+    var isManualCloudSyncing by remember { mutableStateOf(false) }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -1009,6 +1097,224 @@ fun BackupScreen(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
+        // Multi-Device Live Cloud Sync Card (Firestore + Google Auth)
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            border = madrasaCardBorder(),
+            elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
+        ) {
+            Column(modifier = Modifier.padding(18.dp)) {
+                val (badgeColor, badgeLabel) = when (syncStatus.state) {
+                    SyncConnectionState.LIVE -> MadrasaGreen to "লাইভ সিঙ্ক চালু"
+                    SyncConnectionState.SYNCING -> MadrasaSapphire to "সিঙ্ক হচ্ছে..."
+                    SyncConnectionState.OFFLINE_PENDING -> Color(0xFFD97706) to "অফলাইন / অপেক্ষমাণ"
+                    SyncConnectionState.ERROR -> MadrasaRed to "সিঙ্ক ত্রুটি"
+                    SyncConnectionState.IDLE -> MaterialTheme.colorScheme.onSurfaceVariant to "প্রস্তুত"
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(42.dp)
+                                .clip(CircleShape)
+                                .background(badgeColor.copy(alpha = 0.15f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.CloudSync,
+                                contentDescription = null,
+                                tint = badgeColor,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "মাল্টি-ডিভাইস লাইভ ক্লাউড সিঙ্ক",
+                                fontSize = 15.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Text(
+                                text = if (syncStatus.userEmail.isNotBlank()) {
+                                    "অ্যাকাউন্ট: ${syncStatus.userEmail}"
+                                } else {
+                                    "M PRO Cloud Sync"
+                                },
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    Surface(
+                        shape = RoundedCornerShape(999.dp),
+                        color = badgeColor.copy(alpha = 0.14f),
+                        border = BorderStroke(1.dp, badgeColor.copy(alpha = 0.45f))
+                    ) {
+                        Text(
+                            text = badgeLabel,
+                            color = badgeColor,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Surface(
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.38f),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(11.dp)) {
+                        Text(
+                            text = syncStatus.message,
+                            fontSize = 12.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        if (syncStatus.lastSyncedTime.isNotBlank()) {
+                            Spacer(modifier = Modifier.height(3.dp))
+                            Text(
+                                text = "সর্বশেষ সিঙ্ক: ${syncStatus.lastSyncedTime}",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Row(verticalAlignment = Alignment.Top) {
+                            Icon(
+                                imageVector = Icons.Default.Devices,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier
+                                    .padding(top = 2.dp)
+                                    .size(15.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "অন্য মোবাইলে এই অ্যাপ ইনস্টল করে একই Google অ্যাকাউন্ট (${syncStatus.userEmail.ifBlank { "আপনার ইমেইল" }}) দিয়ে লগইন করলে সাথে সাথে বা কয়েকদিন পরেও সব ডেটা স্বয়ংক্রিয়ভাবে দেখা ও এডিট করা যাবে।",
+                                fontSize = 11.5.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                lineHeight = 16.sp
+                            )
+                        }
+                    }
+                }
+
+                if (!syncStatus.errorMessage.isNullOrBlank()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Surface(
+                        color = MadrasaRed.copy(alpha = 0.1f),
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, MadrasaRed.copy(alpha = 0.35f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = syncStatus.errorMessage ?: "",
+                            fontSize = 11.5.sp,
+                            color = MadrasaRed,
+                            modifier = Modifier.padding(10.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Button(
+                        onClick = {
+                            if (isManualCloudSyncing) return@Button
+                            isManualCloudSyncing = true
+                            scope.launch {
+                                val res = viewModel.syncNow()
+                                isManualCloudSyncing = false
+                                res.onSuccess { count ->
+                                    Toast.makeText(
+                                        context,
+                                        "$count টি রেকর্ড ক্লাউডে সিঙ্ক সম্পন্ন হয়েছে!",
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                }.onFailure { err ->
+                                    Toast.makeText(
+                                        context,
+                                        "সিঙ্ক ত্রুটি: ${err.message ?: "ইন্টারনেট সংযোগ পরীক্ষা করুন"}",
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                }
+                            }
+                        },
+                        enabled = !isManualCloudSyncing,
+                        colors = ButtonDefaults.buttonColors(containerColor = MadrasaPrimary),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .heightIn(min = 48.dp)
+                            .testTag("cloud_sync_now_button")
+                    ) {
+                        if (isManualCloudSyncing) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                color = Color.White,
+                                strokeWidth = 2.dp
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("সিঙ্ক হচ্ছে...", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.Sync,
+                                contentDescription = null,
+                                modifier = Modifier.size(17.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("এখনই সিঙ্ক করুন", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            signOutFromCloudSync(
+                                context = context,
+                                scope = scope,
+                                beforeSignOut = { viewModel.stopCloudSync() }
+                            )
+                        },
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = MadrasaRed),
+                        border = BorderStroke(1.dp, MadrasaRed.copy(alpha = 0.5f)),
+                        modifier = Modifier
+                            .heightIn(min = 48.dp)
+                            .testTag("cloud_sync_sign_out_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Logout,
+                            contentDescription = "লগআউট",
+                            modifier = Modifier.size(17.dp)
+                        )
+                        Spacer(modifier = Modifier.width(5.dp))
+                        Text("লগআউট", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            }
+        }
+
         // Google Drive Connect & Cloud Sync Card
         Card(
             modifier = Modifier.fillMaxWidth(),
@@ -1144,7 +1450,7 @@ fun BackupScreen(
 
                 if (isGoogleConnected) {
                     Text(
-                        text = "ক্লাউড স্টোরেজ: Google Drive (Madrasa M PRO)",
+                        text = "ক্লাউড স্টোরেজ: Google Drive (M PRO)",
                         fontSize = 12.5.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurface
@@ -1318,7 +1624,9 @@ fun BackupScreen(
                                 }
                             } else {
                                 try {
-                                    restoreJsonLauncher.launch(arrayOf("application/json", "*/*"))
+                                    restoreJsonLauncher.launch(
+                                        arrayOf("application/json", "text/plain", "application/octet-stream", "*/*")
+                                    )
                                 } catch (_: Exception) {
                                     Toast.makeText(context, "Restore launcher error", Toast.LENGTH_SHORT).show()
                                 }
@@ -1349,7 +1657,7 @@ fun BackupScreen(
             }
         }
 
-        // Local Export / Share Card
+        // Local Export / Share / Restore Card
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(16.dp),
@@ -1366,7 +1674,7 @@ fun BackupScreen(
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "আপনার ফোনের মেমোরিতে JSON ফাইল হিসেবে ব্যাকআপ সেভ করুন অথবা অন্য ডিভাইসে শেয়ার করুন।",
+                    text = "আপনার ফোনের মেমোরি বা ফাইল ম্যানেজারে JSON ফাইল হিসেবে ব্যাকআপ সেভ করুন, শেয়ার করুন অথবা ফাইল ম্যানেজার থেকে ডাবল হওয়া ছাড়াই রিস্টোর করুন।",
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -1379,11 +1687,12 @@ fun BackupScreen(
                     Button(
                         onClick = {
                             val dateSuffix = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
-                            saveDriveJsonLauncher.launch("MadrasaMPro_Backup_$dateSuffix.json")
+                            saveDriveJsonLauncher.launch("MPro_Backup_$dateSuffix.json")
                         },
                         modifier = Modifier
                             .weight(1f)
-                            .heightIn(min = 48.dp),
+                            .heightIn(min = 48.dp)
+                            .testTag("local_export_json_button"),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = MadrasaPrimary,
                             contentColor = Color.White
@@ -1401,7 +1710,7 @@ fun BackupScreen(
                                 try {
                                     val shareUri = withContext(Dispatchers.IO) {
                                         val jsonString = createBackupJson()
-                                        val backupFile = File(context.cacheDir, "MadrasaMPro_Share_Backup.json")
+                                        val backupFile = File(context.cacheDir, "MPro_Share_Backup.json")
                                         FileOutputStream(backupFile).use { out ->
                                             out.write(jsonString.toByteArray(Charsets.UTF_8))
                                         }
@@ -1414,7 +1723,7 @@ fun BackupScreen(
                                     val intent = Intent(Intent.ACTION_SEND).apply {
                                         type = "application/json"
                                         putExtra(Intent.EXTRA_STREAM, shareUri)
-                                        putExtra(Intent.EXTRA_SUBJECT, "Madrasa M PRO Backup")
+                                        putExtra(Intent.EXTRA_SUBJECT, "M PRO Backup")
                                         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                                     }
                                     context.startActivity(Intent.createChooser(intent, "শেয়ার করুন"))
@@ -1425,7 +1734,8 @@ fun BackupScreen(
                         },
                         modifier = Modifier
                             .weight(1f)
-                            .heightIn(min = 48.dp),
+                            .heightIn(min = 48.dp)
+                            .testTag("local_share_backup_button"),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = MadrasaAccent,
                             contentColor = Color.White
@@ -1435,6 +1745,74 @@ fun BackupScreen(
                         Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
                         Text("Share Backup", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Button(
+                    onClick = {
+                        if (!isRestoringFile) {
+                            try {
+                                restoreJsonLauncher.launch(
+                                    arrayOf("application/json", "text/plain", "application/octet-stream", "*/*")
+                                )
+                            } catch (e: Exception) {
+                                Toast.makeText(
+                                    context,
+                                    "ফাইল ম্যানেজার খুলতে সমস্যা: ${e.message}",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        }
+                    },
+                    enabled = !isRestoringFile,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp)
+                        .testTag("local_restore_json_button"),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MadrasaSapphire,
+                        contentColor = Color.White,
+                        disabledContainerColor = MadrasaSapphire.copy(alpha = 0.55f),
+                        disabledContentColor = Color.White.copy(alpha = 0.85f)
+                    ),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    if (isRestoringFile) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            color = Color.White,
+                            strokeWidth = 2.dp
+                        )
+                    } else {
+                        Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = if (isRestoringFile) "রিস্টোর হচ্ছে..." else "ফাইল ম্যানেজার থেকে রিস্টোর (Restore JSON)",
+                        fontSize = 13.5.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                val restoreStatus = lastLocalRestoreStatus
+                if (!restoreStatus.isNullOrBlank()) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    val tintColor = if (lastLocalRestoreIsWarning) MadrasaRed else MadrasaGreen
+                    Surface(
+                        color = tintColor.copy(alpha = 0.11f),
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, tintColor.copy(alpha = 0.35f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = restoreStatus,
+                            color = tintColor,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier.padding(10.dp)
+                        )
                     }
                 }
             }
@@ -1460,8 +1838,11 @@ fun BackupScreen(
                 BackupStatRow(label = "মোট ফি আদায়ের রশিদ:", count = "${fees.size} টি")
                 BackupStatRow(label = "সংরক্ষিত পরীক্ষার রেজাল্ট:", count = "${results.size} টি")
                 BackupStatRow(label = "শিক্ষক সংখ্যা:", count = "${teachers.size} জন")
+                BackupStatRow(label = "শিক্ষক বেতন রশিদ:", count = "${teacherPayments.size} টি")
                 BackupStatRow(label = "খরচ ও দানের এন্ট্রি:", count = "${expenses.size} টি")
                 BackupStatRow(label = "নোটিশ সংখ্যা:", count = "${notices.size} টি")
+                BackupStatRow(label = "প্রশ্নপত্র সংখ্যা:", count = "${questionPapers.size} টি")
+                BackupStatRow(label = "ক্লাস রুটিন:", count = "${classRoutines.size} টি")
             }
         }
     }
@@ -1497,12 +1878,16 @@ fun BackupScreen(
                                         showDriveRestoreDialog = false
                                         scope.launch {
                                             val res = downloadAndRestoreDriveFile(entry.id)
-                                            res.onSuccess { count ->
-                                                Toast.makeText(
-                                                    context,
-                                                    "Drive থেকে $count টি তথ্য সফলভাবে রিস্টোর হয়েছে!",
-                                                    Toast.LENGTH_LONG
-                                                ).show()
+                                            res.onSuccess { summary ->
+                                                val msg = when {
+                                                    summary.isDuplicateFile ->
+                                                        "Drive ফাইলটি (${entry.name}) আগেই রিস্টোর করা আছে! ${summary.skippedDuplicateCount} টি তথ্য ডাবল হওয়া থেকে সুরক্ষিত রাখা হয়েছে।"
+                                                    summary.skippedDuplicateCount > 0 ->
+                                                        "Drive থেকে ${summary.addedOrUpdatedCount} টি তথ্য রিস্টোর হয়েছে (${summary.skippedDuplicateCount} টি ডুপ্লিকেট এড়ানো হয়েছে)।"
+                                                    else ->
+                                                        "Drive থেকে ${summary.addedOrUpdatedCount} টি তথ্য সফলভাবে রিস্টোর হয়েছে!"
+                                                }
+                                                Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
                                             }.onFailure { err ->
                                                 Toast.makeText(
                                                     context,
@@ -1541,7 +1926,9 @@ fun BackupScreen(
                 Button(
                     onClick = {
                         showDriveRestoreDialog = false
-                        restoreJsonLauncher.launch(arrayOf("application/json", "*/*"))
+                        restoreJsonLauncher.launch(
+                            arrayOf("application/json", "text/plain", "application/octet-stream", "*/*")
+                        )
                     },
                     colors = ButtonDefaults.buttonColors(
                         containerColor = MadrasaAccent,

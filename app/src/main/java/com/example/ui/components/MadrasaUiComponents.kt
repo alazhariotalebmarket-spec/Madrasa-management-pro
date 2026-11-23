@@ -3,7 +3,9 @@ package com.example.ui.components
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.widget.Toast
+import androidx.annotation.DrawableRes
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -27,21 +29,100 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.example.R
 import com.example.ui.theme.MadrasaGold
 import com.example.ui.theme.MadrasaPrimaryDark
 import com.example.ui.theme.MadrasaRed
 import com.example.ui.theme.MadrasaSky
 import com.example.ui.theme.MadrasaTeal
+import java.io.File
 import kotlin.math.cos
 import kotlin.math.sin
+
+@Composable
+fun MadrasaRoundLogo(
+    logoPath: String,
+    size: Dp,
+    modifier: Modifier = Modifier,
+    borderWidth: Dp = 1.5.dp,
+    borderColor: Color = MadrasaGold.copy(alpha = 0.85f),
+    showBorder: Boolean = true,
+    backgroundColor: Color? = null,
+    shadowElevation: Dp = 0.dp,
+    @DrawableRes fallbackResId: Int = R.drawable.img_mpro_emblem,
+    contentDescription: String = "মাদ্রাসা লোগো"
+) {
+    val context = LocalContext.current
+    val hasValidCustomLogo = remember(logoPath) {
+        if (logoPath.isBlank()) {
+            false
+        } else {
+            try {
+                val uri = Uri.parse(logoPath)
+                if (uri.scheme == "file" || uri.scheme.isNullOrBlank()) {
+                    val f = File(uri.path ?: logoPath)
+                    f.exists() && f.length() > 0L
+                } else {
+                    true
+                }
+            } catch (_: Throwable) {
+                false
+            }
+        }
+    }
+
+    val resolvedBg = backgroundColor ?: if (hasValidCustomLogo) Color.White else Color(0xFF0C4437)
+
+    Surface(
+        shape = CircleShape,
+        color = resolvedBg,
+        border = if (showBorder && borderWidth > 0.dp) BorderStroke(borderWidth, borderColor) else null,
+        shadowElevation = shadowElevation,
+        modifier = modifier.size(size)
+    ) {
+        val innerPadding = if (showBorder && borderWidth > 0.dp) 1.5.dp else 0.dp
+        val fallbackPainter = painterResource(id = fallbackResId)
+        if (hasValidCustomLogo) {
+            AsyncImage(
+                model = remember(logoPath) {
+                    ImageRequest.Builder(context)
+                        .data(Uri.parse(logoPath))
+                        .crossfade(true)
+                        .build()
+                },
+                placeholder = fallbackPainter,
+                error = fallbackPainter,
+                contentDescription = contentDescription,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+                    .clip(CircleShape)
+            )
+        } else {
+            Image(
+                painter = fallbackPainter,
+                contentDescription = contentDescription,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+                    .clip(CircleShape)
+            )
+        }
+    }
+}
 
 val MadrasaHeaderGradient: Brush
     get() = Brush.horizontalGradient(
@@ -171,6 +252,7 @@ fun IslamicPatternOverlay(modifier: Modifier = Modifier) {
 fun SubScreenTopBar(
     title: String,
     subtitle: String? = null,
+    logoPath: String = "",
     onBack: () -> Unit
 ) {
     Surface(
@@ -240,24 +322,12 @@ fun SubScreenTopBar(
 
                     Spacer(modifier = Modifier.width(8.dp))
 
-                    Surface(
-                        shape = CircleShape,
-                        color = Color.White,
-                        border = BorderStroke(1.5.dp, MadrasaGold.copy(alpha = 0.85f)),
-                        modifier = Modifier
-                            .padding(end = 6.dp)
-                            .size(38.dp)
-                    ) {
-                        Image(
-                            painter = painterResource(id = R.drawable.madrasa_logo_round),
-                            contentDescription = "মাদ্রাসা লোগো",
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(1.5.dp)
-                                .clip(CircleShape)
-                        )
-                    }
+                    MadrasaRoundLogo(
+                        logoPath = logoPath,
+                        size = 38.dp,
+                        borderWidth = 1.5.dp,
+                        modifier = Modifier.padding(end = 6.dp)
+                    )
                 }
 
                 // Subtle Warm Gold Hairline Trim

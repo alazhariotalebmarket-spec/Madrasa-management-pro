@@ -29,6 +29,7 @@ import com.example.data.MadrasaInfo
 import com.example.data.entity.FeeEntity
 import com.example.data.entity.StudentEntity
 import com.example.ui.components.MadrasaEmptyState
+import com.example.ui.components.MadrasaRoundLogo
 import com.example.ui.components.ThreeDotDeleteMenu
 import com.example.ui.components.madrasaCardBorder
 import com.example.ui.theme.MadrasaAccent
@@ -556,10 +557,10 @@ fun FeesScreen(
                         modifier = Modifier.padding(16.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Image(
-                            painter = painterResource(id = R.drawable.madrasa_logo_round),
-                            contentDescription = "Logo",
-                            modifier = Modifier.size(50.dp).clip(CircleShape)
+                        MadrasaRoundLogo(
+                            logoPath = madrasaInfo.logoPath,
+                            size = 52.dp,
+                            borderWidth = 1.5.dp
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(

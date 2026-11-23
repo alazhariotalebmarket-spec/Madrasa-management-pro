@@ -20,6 +20,6 @@ dependencyResolutionManagement {
   }
 }
 
-rootProject.name = "Madrasa M PRO"
+rootProject.name = "M PRO"
 
 include(":app")

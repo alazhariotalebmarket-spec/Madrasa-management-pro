@@ -12,6 +12,9 @@ interface StudentDao {
     @Query("SELECT * FROM students ORDER BY id DESC")
     fun getAllStudents(): Flow<List<StudentEntity>>
 
+    @Query("SELECT * FROM students")
+    suspend fun getAllStudentsOnce(): List<StudentEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertStudent(student: StudentEntity): Long
 
@@ -26,6 +29,9 @@ interface StudentDao {
 interface FeeDao {
     @Query("SELECT * FROM fees ORDER BY id DESC")
     fun getAllFees(): Flow<List<FeeEntity>>
+
+    @Query("SELECT * FROM fees")
+    suspend fun getAllFeesOnce(): List<FeeEntity>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertFee(fee: FeeEntity): Long
@@ -42,17 +48,26 @@ interface AttendanceDao {
     @Query("SELECT * FROM attendance WHERE date = :date")
     fun getAttendanceForDate(date: String): Flow<List<AttendanceEntity>>
 
+    @Query("SELECT * FROM attendance")
+    suspend fun getAllAttendanceOnce(): List<AttendanceEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAttendance(attendance: AttendanceEntity)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAllAttendance(items: List<AttendanceEntity>)
+
+    @Query("DELETE FROM attendance WHERE id = :id")
+    suspend fun deleteAttendance(id: Int)
 }
 
 @Dao
 interface ResultDao {
     @Query("SELECT * FROM results ORDER BY id DESC")
     fun getAllResults(): Flow<List<ResultEntity>>
+
+    @Query("SELECT * FROM results")
+    suspend fun getAllResultsOnce(): List<ResultEntity>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertResult(result: ResultEntity): Long
@@ -69,6 +84,9 @@ interface TeacherDao {
     @Query("SELECT * FROM teachers ORDER BY id DESC")
     fun getAllTeachers(): Flow<List<TeacherEntity>>
 
+    @Query("SELECT * FROM teachers")
+    suspend fun getAllTeachersOnce(): List<TeacherEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertTeacher(teacher: TeacherEntity)
 
@@ -83,6 +101,9 @@ interface TeacherDao {
 interface TeacherPaymentDao {
     @Query("SELECT * FROM teacher_payments ORDER BY id DESC")
     fun getAllTeacherPayments(): Flow<List<TeacherPaymentEntity>>
+
+    @Query("SELECT * FROM teacher_payments")
+    suspend fun getAllTeacherPaymentsOnce(): List<TeacherPaymentEntity>
 
     @Query("SELECT * FROM teacher_payments WHERE teacherId = :teacherId ORDER BY id DESC")
     fun getPaymentsForTeacher(teacherId: Int): Flow<List<TeacherPaymentEntity>>
@@ -102,6 +123,9 @@ interface ExpenseDao {
     @Query("SELECT * FROM expenses ORDER BY id DESC")
     fun getAllExpenses(): Flow<List<ExpenseEntity>>
 
+    @Query("SELECT * FROM expenses")
+    suspend fun getAllExpensesOnce(): List<ExpenseEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertExpense(expense: ExpenseEntity)
 
@@ -116,6 +140,9 @@ interface ExpenseDao {
 interface NoticeDao {
     @Query("SELECT * FROM notices ORDER BY id DESC")
     fun getAllNotices(): Flow<List<NoticeEntity>>
+
+    @Query("SELECT * FROM notices")
+    suspend fun getAllNoticesOnce(): List<NoticeEntity>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertNotice(notice: NoticeEntity)
@@ -132,8 +159,14 @@ interface QuestionPaperDao {
     @Query("SELECT * FROM question_papers ORDER BY id DESC")
     fun getAllQuestionPapers(): Flow<List<QuestionPaperEntity>>
 
+    @Query("SELECT * FROM question_papers")
+    suspend fun getAllQuestionPapersOnce(): List<QuestionPaperEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertQuestionPaper(paper: QuestionPaperEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAllQuestionPapers(papers: List<QuestionPaperEntity>)
 
     @Query("DELETE FROM question_papers WHERE id = :id")
     suspend fun deleteQuestionPaper(id: Int)
@@ -144,8 +177,14 @@ interface ClassRoutineDao {
     @Query("SELECT * FROM class_routines ORDER BY id ASC")
     fun getAllClassRoutines(): Flow<List<ClassRoutineEntity>>
 
+    @Query("SELECT * FROM class_routines")
+    suspend fun getAllClassRoutinesOnce(): List<ClassRoutineEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertClassRoutine(routine: ClassRoutineEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAllClassRoutines(routines: List<ClassRoutineEntity>)
 
     @Query("DELETE FROM class_routines WHERE id = :id")
     suspend fun deleteClassRoutine(id: Int)

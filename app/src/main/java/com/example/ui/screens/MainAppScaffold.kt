@@ -46,9 +46,9 @@ private fun subScreenMeta(route: String): Pair<String, String> = when (route) {
     "financial" -> "আর্থিক বিবরণী" to "মাদ্রাসার আয়-ব্যয়ের পূর্ণাঙ্গ হিসাব"
     "merit_list" -> "মেধাতালিকা" to "পরীক্ষার মেধাক্রম ও PDF রিপোর্ট"
     "notice" -> "নোটিশ বোর্ড" to "ঘোষণা প্রকাশ ও হাই-রেজুলেশন ফটো"
-    "backup" -> "ব্যাকআপ ও সিঙ্ক" to "ডেটা ব্যাকআপ, APK ও গুগল ড্রাইভ"
+    "backup" -> "ব্যাকআপ ও ক্লাউড সিঙ্ক" to "মাল্টি-ডিভাইস লাইভ সিঙ্ক, ফাইল ও গুগল ড্রাইভ"
     "developer" -> "ডেভেলপার" to "প্রস্তুতকারকের তথ্য ও APK ডাউনলোড"
-    else -> "মাদ্রাসা ম্যানেজমেন্ট" to ""
+    else -> "M PRO" to ""
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -71,6 +71,7 @@ fun MainAppScaffold(viewModel: MadrasaViewModel) {
     val questionPapers by viewModel.questionPapers.collectAsStateWithLifecycle()
     val classRoutines by viewModel.classRoutines.collectAsStateWithLifecycle()
     val madrasaInfo by viewModel.madrasaInfo.collectAsStateWithLifecycle()
+    val syncStatus by viewModel.syncStatus.collectAsStateWithLifecycle()
 
     val bottomTabs = remember {
         listOf(
@@ -93,6 +94,7 @@ fun MainAppScaffold(viewModel: MadrasaViewModel) {
                 SubScreenTopBar(
                     title = title,
                     subtitle = subtitle,
+                    logoPath = madrasaInfo.logoPath,
                     onBack = { currentTab = "dashboard" }
                 )
             }
@@ -161,8 +163,12 @@ fun MainAppScaffold(viewModel: MadrasaViewModel) {
                         students = students,
                         fees = fees,
                         madrasaInfo = madrasaInfo,
-                        onUpdateMadrasaInfo = { name, address, phone ->
-                            viewModel.updateMadrasaInfo(name, address, phone)
+                        syncStatus = syncStatus,
+                        onUpdateMadrasaInfo = { name, address, phone, logoPath ->
+                            viewModel.updateMadrasaInfo(name, address, phone, logoPath)
+                        },
+                        onUpdateMadrasaLogo = { logoPath ->
+                            viewModel.updateMadrasaLogo(logoPath)
                         },
                         onNavigate = { screen -> currentTab = screen }
                     )
@@ -177,6 +183,7 @@ fun MainAppScaffold(viewModel: MadrasaViewModel) {
                     )
                     "attendance" -> AttendanceScreen(
                         students = students,
+                        getAttendanceForDate = { date -> viewModel.getAttendanceForDate(date) },
                         onSaveAttendance = { date, map -> viewModel.saveAttendance(date, map) }
                     )
                     "fees" -> FeesScreen(

@@ -148,16 +148,32 @@ object NoticeImageUtil {
         }
         canvas.drawRoundRect(40f, 40f, width - 40f, headerBottom, 18f, 18f, headerPaint)
 
-        // Madrasa Logo
+        // Madrasa Logo (Circular + Gold Ring)
         try {
-            val srcLogo = BitmapFactory.decodeResource(context.resources, R.drawable.madrasa_logo_round)
-            if (srcLogo != null) {
-                val logoSize = 128
-                val scaledLogo = Bitmap.createScaledBitmap(srcLogo, logoSize, logoSize, true)
+            val circularLogo = MadrasaLogoUtil.loadCircularLogoBitmap(context, madrasaInfo.logoPath, 256)
+            if (circularLogo != null) {
+                val logoSize = 128f
+                val logoLeft = 62f
                 val logoTop = 40f + (headerBottom - 40f - logoSize) / 2f
-                canvas.drawBitmap(scaledLogo, 62f, logoTop, null)
-                if (scaledLogo != srcLogo) srcLogo.recycle()
-                scaledLogo.recycle()
+                val logoPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+                canvas.drawBitmap(
+                    circularLogo,
+                    null,
+                    RectF(logoLeft, logoTop, logoLeft + logoSize, logoTop + logoSize),
+                    logoPaint
+                )
+                val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    color = 0xFFD4AF37.toInt()
+                    style = Paint.Style.STROKE
+                    strokeWidth = 3.5f
+                }
+                canvas.drawCircle(
+                    logoLeft + logoSize / 2f,
+                    logoTop + logoSize / 2f,
+                    logoSize / 2f,
+                    ringPaint
+                )
+                circularLogo.recycle()
             }
         } catch (_: Exception) {}
 
