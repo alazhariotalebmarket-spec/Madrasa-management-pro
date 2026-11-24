@@ -62,6 +62,7 @@ class MainActivity : ComponentActivity() {
         )
 
         val madrasaInfo by viewModel.madrasaInfo.collectAsStateWithLifecycle()
+        val logoState by viewModel.logoState.collectAsStateWithLifecycle()
 
         Box(modifier = Modifier.fillMaxSize()) {
           MainAppScaffold(viewModel = viewModel)
@@ -73,6 +74,7 @@ class MainActivity : ComponentActivity() {
           ) {
             MadrasaSplashOverlay(
               madrasaInfo = madrasaInfo,
+              logoVersion = logoState.version,
               onFinished = { showSplash = false }
             )
           }

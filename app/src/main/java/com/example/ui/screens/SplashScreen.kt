@@ -53,6 +53,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun MadrasaSplashOverlay(
     madrasaInfo: MadrasaInfo,
+    logoVersion: Long = 0L,
     onFinished: () -> Unit
 ) {
     val emblemScale = remember { Animatable(0.55f) }
@@ -122,6 +123,7 @@ fun MadrasaSplashOverlay(
 
                 MadrasaRoundLogo(
                     logoPath = madrasaInfo.logoPath,
+                    logoVersion = logoVersion,
                     size = 164.dp,
                     borderWidth = 3.dp,
                     borderColor = MadrasaGold,

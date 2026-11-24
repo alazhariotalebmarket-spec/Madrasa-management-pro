@@ -216,6 +216,7 @@ fun BackupScreen(
                 put("subject", r.subject)
                 put("teacherName", r.teacherName)
                 put("duration", r.duration)
+                put("serialOrder", r.serialOrder)
             })
         }
         root.put("classRoutines", routinesArray)

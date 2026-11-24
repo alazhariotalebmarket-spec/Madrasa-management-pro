@@ -5,6 +5,8 @@ import android.graphics.*
 import android.media.ExifInterface
 import android.net.Uri
 import android.util.Base64
+import coil.annotation.ExperimentalCoilApi
+import coil.imageLoader
 import com.example.R
 import com.example.data.MadrasaInfoStore
 import java.io.File
@@ -14,6 +16,34 @@ import java.io.InputStream
 import kotlin.math.min
 
 object MadrasaLogoUtil {
+
+    @OptIn(ExperimentalCoilApi::class)
+    fun clearLogoCache(context: Context) {
+        try {
+            val loader = context.applicationContext.imageLoader
+            loader.memoryCache?.clear()
+            loader.diskCache?.clear()
+        } catch (_: Throwable) {}
+    }
+
+    fun computeLogoCacheKey(logoPath: String, logoVersion: Long = 0L): String {
+        if (logoPath.isBlank()) return "default_emblem_$logoVersion"
+        return try {
+            val uri = Uri.parse(logoPath)
+            if (uri.scheme == "file" || uri.scheme.isNullOrBlank()) {
+                val file = File(uri.path ?: logoPath)
+                if (file.exists()) {
+                    "${file.absolutePath}#${file.lastModified()}#${file.length()}#$logoVersion"
+                } else {
+                    "$logoPath#$logoVersion"
+                }
+            } else {
+                "$logoPath#$logoVersion"
+            }
+        } catch (_: Throwable) {
+            "$logoPath#$logoVersion"
+        }
+    }
 
     private fun openLogoStream(context: Context, logoPath: String): InputStream? {
         if (logoPath.isBlank()) return null
@@ -137,32 +167,24 @@ object MadrasaLogoUtil {
     }
 
     /**
-     * Center-crops to a square, scales smoothly to [targetSizePx], and applies an
-     * anti-aliased BitmapShader circle mask so edges are crisp and corners are transparent.
+     * Fits the bitmap proportionally inside [targetSizePx] on a crisp white circular canvas
+     * (without stretching or cropping edges) and applies an anti-aliased BitmapShader circle mask.
      */
     fun toCircularBitmap(src: Bitmap, targetSizePx: Int): Bitmap {
-        val side = min(src.width, src.height)
-        val xOff = (src.width - side) / 2
-        val yOff = (src.height - side) / 2
-
-        val squareSrc = if (src.width != src.height) {
-            Bitmap.createBitmap(src, xOff, yOff, side, side)
-        } else {
-            src
-        }
-
-        val scaled = if (squareSrc.width != targetSizePx || squareSrc.height != targetSizePx) {
-            Bitmap.createScaledBitmap(squareSrc, targetSizePx, targetSizePx, true)
-        } else {
-            squareSrc
-        }
+        val safeW = src.width.coerceAtLeast(1).toFloat()
+        val safeH = src.height.coerceAtLeast(1).toFloat()
+        val fitScale = min(targetSizePx.toFloat() / safeW, targetSizePx.toFloat() / safeH)
+        val drawW = safeW * fitScale
+        val drawH = safeH * fitScale
+        val left = (targetSizePx - drawW) / 2f
+        val top = (targetSizePx - drawH) / 2f
 
         // Composite over white inside the circle so transparent edges render cleanly on dark headers
         val composed = Bitmap.createBitmap(targetSizePx, targetSizePx, Bitmap.Config.ARGB_8888)
         val compCanvas = Canvas(composed)
         compCanvas.drawColor(Color.WHITE)
         val imgPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG or Paint.DITHER_FLAG)
-        compCanvas.drawBitmap(scaled, 0f, 0f, imgPaint)
+        compCanvas.drawBitmap(src, null, RectF(left, top, left + drawW, top + drawH), imgPaint)
 
         val output = Bitmap.createBitmap(targetSizePx, targetSizePx, Bitmap.Config.ARGB_8888)
         val outCanvas = Canvas(output)
@@ -173,12 +195,6 @@ object MadrasaLogoUtil {
         val radius = targetSizePx / 2f
         outCanvas.drawCircle(radius, radius, radius, circlePaint)
 
-        if (squareSrc != src) {
-            try { squareSrc.recycle() } catch (_: Exception) {}
-        }
-        if (scaled != squareSrc && scaled != src) {
-            try { scaled.recycle() } catch (_: Exception) {}
-        }
         try { composed.recycle() } catch (_: Exception) {}
 
         return output

@@ -42,7 +42,8 @@ import com.example.util.PdfPrintUtil
 fun IdCardScreen(
     students: List<StudentEntity>,
     teachers: List<TeacherEntity>,
-    madrasaInfo: MadrasaInfo = MadrasaInfo()
+    madrasaInfo: MadrasaInfo = MadrasaInfo(),
+    logoVersion: Long = 0L
 ) {
     val context = LocalContext.current
     var selectedType by remember { mutableStateOf("student") } // "student" or "teacher"
@@ -354,6 +355,7 @@ fun IdCardScreen(
         StudentIdCardDialog(
             student = st,
             madrasaInfo = madrasaInfo,
+            logoVersion = logoVersion,
             onDismiss = { previewStudent = null }
         )
     }
@@ -362,6 +364,7 @@ fun IdCardScreen(
         TeacherIdCardDialog(
             teacher = t,
             madrasaInfo = madrasaInfo,
+            logoVersion = logoVersion,
             onDismiss = { previewTeacher = null }
         )
     }
@@ -371,6 +374,7 @@ fun IdCardScreen(
 fun TeacherIdCardDialog(
     teacher: TeacherEntity,
     madrasaInfo: MadrasaInfo = MadrasaInfo(),
+    logoVersion: Long = 0L,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
@@ -428,6 +432,7 @@ fun TeacherIdCardDialog(
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             MadrasaRoundLogo(
                                 logoPath = madrasaInfo.logoPath,
+                                logoVersion = logoVersion,
                                 size = 46.dp,
                                 borderWidth = 1.5.dp
                             )

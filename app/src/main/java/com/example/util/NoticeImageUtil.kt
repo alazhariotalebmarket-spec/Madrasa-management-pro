@@ -27,9 +27,6 @@ object NoticeImageUtil {
     private val imageExecutor = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
 
-    private const val MADRASA_NAME = "ইসহাকিয়া কেরাতুল কোরআন নূরানী ও হাফেজিয়া মাদ্রাসা"
-    private const val MADRASA_ADDRESS = "পশ্চিম তুষখালী, ছোটবিঘাই, পটুয়াখালী সদর, পটুয়াখালী"
-    private const val MADRASA_PHONE = "+8801726541607"
     private const val DEVELOPER_FOOTER = "প্রস্তুতকারী: মোঃ ফেরদাউস মোল্লা (+8801934411199)"
 
     private fun buildLayout(

@@ -96,6 +96,7 @@ fun ResultsScreen(
     students: List<StudentEntity>,
     results: List<ResultEntity>,
     madrasaInfo: MadrasaInfo = MadrasaInfo(),
+    logoVersion: Long = 0L,
     onSaveResult: (Int, Int, String, List<SubjectMark>, String?) -> Unit,
     onDeleteResult: (Int) -> Unit,
     gradeCalculator: (Double) -> String
@@ -676,6 +677,7 @@ fun ResultsScreen(
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                 MadrasaRoundLogo(
                                     logoPath = madrasaInfo.logoPath,
+                                    logoVersion = logoVersion,
                                     size = 52.dp,
                                     borderWidth = 1.5.dp
                                 )
@@ -920,6 +922,7 @@ fun ResultsScreen(
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                 MadrasaRoundLogo(
                                     logoPath = madrasaInfo.logoPath,
+                                    logoVersion = logoVersion,
                                     size = 52.dp,
                                     borderWidth = 1.5.dp
                                 )

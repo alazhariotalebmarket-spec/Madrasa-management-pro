@@ -20,6 +20,7 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.FactCheck
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -70,6 +71,7 @@ fun DashboardScreen(
     students: List<StudentEntity>,
     fees: List<FeeEntity>,
     madrasaInfo: MadrasaInfo,
+    logoVersion: Long = 0L,
     onOpenDrawer: () -> Unit = {},
     onUpdateMadrasaInfo: (String, String, String, String?) -> Unit,
     onUpdateMadrasaLogo: (String) -> Unit,
@@ -94,7 +96,7 @@ fun DashboardScreen(
     val menuItems = remember {
         listOf(
             MenuOption("ভর্তি", Icons.Default.PersonAdd, "students", "menu_admission"),
-            MenuOption("হাজিরা", Icons.Default.FactCheck, "attendance", "menu_attendance"),
+            MenuOption("হাজিরা", Icons.AutoMirrored.Filled.FactCheck, "attendance", "menu_attendance"),
             MenuOption("কল ও এসএমএস", Icons.Default.Call, "report", "menu_call_sms"),
             MenuOption("বেতন ও বিদ্যুৎ বিল", Icons.Default.Payments, "fees", "menu_fees"),
             MenuOption("প্রশ্নপত্র", Icons.Default.Description, "question_paper", "menu_question_paper"),
@@ -225,7 +227,8 @@ fun DashboardScreen(
                         ) {
                             MadrasaRoundLogo(
                                 logoPath = madrasaInfo.logoPath,
-                                size = 66.dp,
+                                logoVersion = logoVersion,
+                                size = 64.dp,
                                 borderWidth = 2.dp,
                                 borderColor = MadrasaGold.copy(alpha = 0.9f),
                                 shadowElevation = 6.dp,
@@ -564,6 +567,7 @@ fun DashboardScreen(
                         ) {
                             MadrasaRoundLogo(
                                 logoPath = dialogLogoPath,
+                                logoVersion = logoVersion,
                                 size = 64.dp,
                                 borderWidth = 2.dp,
                                 borderColor = MadrasaGold

@@ -156,5 +156,6 @@ data class ClassRoutineEntity(
     val timeSlot: String,
     val subject: String,
     val teacherName: String,
-    val duration: String = ""
+    val duration: String = "",
+    val serialOrder: Int = 0
 )

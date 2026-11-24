@@ -7,6 +7,7 @@ import com.example.data.MadrasaInfo
 import com.example.data.MadrasaInfoStore
 import com.example.data.MadrasaRepository
 import com.example.data.entity.*
+import com.example.util.MadrasaLogoUtil
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -14,6 +15,13 @@ import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.*
 import kotlin.random.Random
+
+data class LogoUiState(
+    val logoPath: String = "",
+    val version: Long = 0L
+) {
+    val isCustomLogo: Boolean get() = logoPath.isNotBlank()
+}
 
 data class BackupRestoreSummary(
     val totalInFile: Int,
@@ -34,6 +42,15 @@ class MadrasaViewModel(
     private val _madrasaInfo = MutableStateFlow(MadrasaInfoStore.getInfo(appCtx))
     val madrasaInfo: StateFlow<MadrasaInfo> = _madrasaInfo.asStateFlow()
 
+    private val _logoVersion = MutableStateFlow(System.currentTimeMillis())
+    val logoState: StateFlow<LogoUiState> = combine(_madrasaInfo, _logoVersion) { info, ver ->
+        LogoUiState(logoPath = info.logoPath, version = ver)
+    }.stateIn(
+        viewModelScope,
+        SharingStarted.Eagerly,
+        LogoUiState(logoPath = _madrasaInfo.value.logoPath, version = _logoVersion.value)
+    )
+
     private fun generateUniqueLocalId(existingIds: Set<Int>): Int {
         var candidate: Int
         do {
@@ -49,16 +66,24 @@ class MadrasaViewModel(
 
     fun updateMadrasaInfo(name: String, address: String, phone: String, logoPath: String? = null) {
         val updated = MadrasaInfoStore.saveInfo(appCtx, name, address, phone, logoPath)
+        MadrasaLogoUtil.clearLogoCache(appCtx)
         _madrasaInfo.value = updated
+        _logoVersion.value = System.currentTimeMillis()
         if (logoPath != null) {
-            com.example.util.MadrasaLogoUtil.cleanupOldLogoFiles(appCtx, updated.logoPath)
+            viewModelScope.launch(Dispatchers.IO) {
+                MadrasaLogoUtil.cleanupOldLogoFiles(appCtx, updated.logoPath)
+            }
         }
     }
 
     fun updateMadrasaLogo(logoPath: String) {
         val updated = MadrasaInfoStore.saveLogoPath(appCtx, logoPath)
+        MadrasaLogoUtil.clearLogoCache(appCtx)
         _madrasaInfo.value = updated
-        com.example.util.MadrasaLogoUtil.cleanupOldLogoFiles(appCtx, updated.logoPath)
+        _logoVersion.value = System.currentTimeMillis()
+        viewModelScope.launch(Dispatchers.IO) {
+            MadrasaLogoUtil.cleanupOldLogoFiles(appCtx, updated.logoPath)
+        }
     }
 
     val students: StateFlow<List<StudentEntity>> = repository.allStudents
@@ -336,10 +361,17 @@ class MadrasaViewModel(
         timeSlot: String,
         subject: String,
         teacherName: String,
-        duration: String = ""
+        duration: String = "",
+        serialOrder: Int = 0
     ) {
         viewModelScope.launch(Dispatchers.IO) {
-            val id = generateUniqueLocalId(classRoutines.value.map { it.id }.toSet())
+            val currentAll = repository.getAllClassRoutinesOnce()
+            val id = generateUniqueLocalId(currentAll.map { it.id }.toSet())
+            val resolvedSerial = if (serialOrder > 0) {
+                serialOrder
+            } else {
+                (currentAll.filter { it.className == className }.maxOfOrNull { it.serialOrder } ?: 0) + 1
+            }
             val entity = ClassRoutineEntity(
                 id = id,
                 className = className,
@@ -347,9 +379,66 @@ class MadrasaViewModel(
                 timeSlot = timeSlot,
                 subject = subject,
                 teacherName = teacherName,
-                duration = duration
+                duration = duration,
+                serialOrder = resolvedSerial
             )
             repository.insertClassRoutine(entity)
+        }
+    }
+
+    fun addClassRoutinesForClasses(
+        targetClasses: List<String>,
+        dayOfWeek: String,
+        timeSlot: String,
+        subject: String,
+        teacherName: String,
+        duration: String = "",
+        serialOrder: Int = 0
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val cleanClasses = targetClasses.map { it.trim() }.filter { it.isNotBlank() }.distinct()
+            if (cleanClasses.isEmpty()) return@launch
+            val currentAll = repository.getAllClassRoutinesOnce()
+            val existingIds = currentAll.map { it.id }.toMutableSet()
+            val newEntities = cleanClasses.map { cls ->
+                val newId = generateUniqueLocalId(existingIds)
+                existingIds.add(newId)
+                val resolvedSerial = if (serialOrder > 0) {
+                    serialOrder
+                } else {
+                    (currentAll.filter { it.className == cls }.maxOfOrNull { it.serialOrder } ?: 0) + 1
+                }
+                ClassRoutineEntity(
+                    id = newId,
+                    className = cls,
+                    dayOfWeek = dayOfWeek,
+                    timeSlot = timeSlot,
+                    subject = subject,
+                    teacherName = teacherName,
+                    duration = duration,
+                    serialOrder = resolvedSerial
+                )
+            }
+            repository.insertAllClassRoutines(newEntities)
+        }
+    }
+
+    fun updateClassRoutine(routine: ClassRoutineEntity) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.insertClassRoutine(routine)
+        }
+    }
+
+    fun swapRoutineSerial(orderedClassList: List<ClassRoutineEntity>, fromIndex: Int, toIndex: Int) {
+        if (fromIndex !in orderedClassList.indices || toIndex !in orderedClassList.indices || fromIndex == toIndex) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val mutable = orderedClassList.toMutableList()
+            val moved = mutable.removeAt(fromIndex)
+            mutable.add(toIndex, moved)
+            val renumbered = mutable.mapIndexed { idx, item ->
+                item.copy(serialOrder = idx + 1)
+            }
+            repository.insertAllClassRoutines(renumbered)
         }
     }
 
@@ -400,9 +489,11 @@ class MadrasaViewModel(
                     phone = instPhone.ifBlank { madrasaInfo.value.phone },
                     logoPath = restoredLogoPath.takeIf { it.isNotBlank() }
                 )
+                MadrasaLogoUtil.clearLogoCache(appCtx)
                 _madrasaInfo.value = savedInfo
+                _logoVersion.value = System.currentTimeMillis()
                 if (restoredLogoPath.isNotBlank()) {
-                    com.example.util.MadrasaLogoUtil.cleanupOldLogoFiles(appCtx, savedInfo.logoPath)
+                    MadrasaLogoUtil.cleanupOldLogoFiles(appCtx, savedInfo.logoPath)
                 }
             }
 
@@ -576,7 +667,8 @@ class MadrasaViewModel(
                             timeSlot = o.optString("timeSlot", ""),
                             subject = o.optString("subject", ""),
                             teacherName = o.optString("teacherName", ""),
-                            duration = o.optString("duration", "")
+                            duration = o.optString("duration", ""),
+                            serialOrder = o.optInt("serialOrder", 0)
                         )
                     )
                 }

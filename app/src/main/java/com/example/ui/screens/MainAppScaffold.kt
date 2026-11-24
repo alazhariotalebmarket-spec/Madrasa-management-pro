@@ -14,6 +14,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.FactCheck
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
@@ -71,6 +72,25 @@ private fun subScreenMeta(route: String): Pair<String, String> = when (route) {
     else -> "M PRO" to ""
 }
 
+private fun subScreenIcon(route: String): ImageVector = when (route) {
+    "students" -> Icons.Default.PersonAdd
+    "attendance" -> Icons.AutoMirrored.Filled.FactCheck
+    "report" -> Icons.Default.Call
+    "fees" -> Icons.Default.Payments
+    "question_paper" -> Icons.Default.Description
+    "results" -> Icons.Default.School
+    "id_card" -> Icons.Default.Badge
+    "admit_card" -> Icons.Default.AssignmentInd
+    "routine" -> Icons.Default.CalendarMonth
+    "teachers" -> Icons.Default.SupervisorAccount
+    "accounts", "expenses", "financial" -> Icons.Default.AccountBalanceWallet
+    "merit_list" -> Icons.Default.EmojiEvents
+    "notice" -> Icons.Default.NotificationsActive
+    "backup" -> Icons.Default.Backup
+    "developer" -> Icons.Default.Code
+    else -> Icons.Default.Home
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainAppScaffold(
@@ -100,6 +120,7 @@ fun MainAppScaffold(
     val questionPapers by viewModel.questionPapers.collectAsStateWithLifecycle()
     val classRoutines by viewModel.classRoutines.collectAsStateWithLifecycle()
     val madrasaInfo by viewModel.madrasaInfo.collectAsStateWithLifecycle()
+    val logoState by viewModel.logoState.collectAsStateWithLifecycle()
 
     val bottomTabs = remember {
         listOf(
@@ -149,7 +170,8 @@ fun MainAppScaffold(
                             .padding(horizontal = 18.dp, vertical = 20.dp)
                     ) {
                         MadrasaRoundLogo(
-                            logoPath = madrasaInfo.logoPath,
+                            logoPath = logoState.logoPath,
+                            logoVersion = logoState.version,
                             size = 64.dp,
                             borderWidth = 2.dp,
                             borderColor = MadrasaGold,
@@ -240,7 +262,9 @@ fun MainAppScaffold(
                     SubScreenTopBar(
                         title = title,
                         subtitle = subtitle,
-                        logoPath = madrasaInfo.logoPath,
+                        logoPath = logoState.logoPath,
+                        logoVersion = logoState.version,
+                        screenIcon = subScreenIcon(currentTab),
                         onBack = { currentTab = "dashboard" }
                     )
                 }
@@ -309,6 +333,7 @@ fun MainAppScaffold(
                                 students = students,
                                 fees = fees,
                                 madrasaInfo = madrasaInfo,
+                                logoVersion = logoState.version,
                                 onOpenDrawer = { scope.launch { drawerState.open() } },
                                 onUpdateMadrasaInfo = { name, address, phone, logoPath ->
                                     viewModel.updateMadrasaInfo(name, address, phone, logoPath)
@@ -321,6 +346,7 @@ fun MainAppScaffold(
                             "students" -> StudentsScreen(
                                 students = students,
                                 madrasaInfo = madrasaInfo,
+                                logoVersion = logoState.version,
                                 onAddStudent = { name, father, phone, cls, fee, photo, roll, electricBill ->
                                     viewModel.addStudent(name, father, phone, cls, fee, photo, roll, electricBill)
                                 },
@@ -342,6 +368,7 @@ fun MainAppScaffold(
                                 students = students,
                                 fees = fees,
                                 madrasaInfo = madrasaInfo,
+                                logoVersion = logoState.version,
                                 onAddFee = { studentId, amount, type, month ->
                                     viewModel.addFee(studentId, amount, type, month)
                                 },
@@ -358,6 +385,7 @@ fun MainAppScaffold(
                                 students = students,
                                 results = results,
                                 madrasaInfo = madrasaInfo,
+                                logoVersion = logoState.version,
                                 onSaveResult = { id, sId, exam, subjects, existingDate ->
                                     viewModel.saveResult(id, sId, exam, subjects, existingDate)
                                 },
@@ -416,7 +444,8 @@ fun MainAppScaffold(
                             "id_card" -> IdCardScreen(
                                 students = students,
                                 teachers = teachers,
-                                madrasaInfo = madrasaInfo
+                                madrasaInfo = madrasaInfo,
+                                logoVersion = logoState.version
                             )
                             "admit_card" -> AdmitCardScreen(
                                 students = students
@@ -432,8 +461,17 @@ fun MainAppScaffold(
                             )
                             "routine" -> ClassRoutineScreen(
                                 routines = classRoutines,
-                                onAddRoutine = { cls, day, slot, sub, teacher, dur ->
-                                    viewModel.addClassRoutine(cls, day, slot, sub, teacher, dur)
+                                onAddRoutine = { cls, day, slot, sub, teacher, dur, serial ->
+                                    viewModel.addClassRoutine(cls, day, slot, sub, teacher, dur, serial)
+                                },
+                                onAddRoutinesForClasses = { classes, day, slot, sub, teacher, dur, serial ->
+                                    viewModel.addClassRoutinesForClasses(classes, day, slot, sub, teacher, dur, serial)
+                                },
+                                onUpdateRoutine = { updated ->
+                                    viewModel.updateClassRoutine(updated)
+                                },
+                                onSwapRoutineSerial = { classList, fromIdx, toIdx ->
+                                    viewModel.swapRoutineSerial(classList, fromIdx, toIdx)
                                 },
                                 onDeleteRoutine = { id ->
                                     viewModel.deleteClassRoutine(id)
@@ -446,6 +484,8 @@ fun MainAppScaffold(
                             )
                             "notice" -> NoticeScreen(
                                 notices = notices,
+                                madrasaInfo = madrasaInfo,
+                                logoVersion = logoState.version,
                                 onAddNotice = { title, desc ->
                                     viewModel.addNotice(title, desc)
                                 },

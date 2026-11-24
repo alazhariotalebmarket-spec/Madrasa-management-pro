@@ -48,6 +48,7 @@ import com.example.ui.theme.TextDark
 fun StudentsScreen(
     students: List<StudentEntity>,
     madrasaInfo: MadrasaInfo = MadrasaInfo(),
+    logoVersion: Long = 0L,
     onAddStudent: (String, String, String, String, Double, String, String, Double) -> Unit,
     onUpdateStudent: (StudentEntity) -> Unit,
     onDeleteStudent: (Int) -> Unit
@@ -493,6 +494,7 @@ fun StudentsScreen(
         StudentIdCardDialog(
             student = idStudent,
             madrasaInfo = madrasaInfo,
+            logoVersion = logoVersion,
             onDismiss = { selectedStudentForIdCard = null }
         )
     }
@@ -502,6 +504,7 @@ fun StudentsScreen(
 fun StudentIdCardDialog(
     student: StudentEntity,
     madrasaInfo: MadrasaInfo = MadrasaInfo(),
+    logoVersion: Long = 0L,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
@@ -561,6 +564,7 @@ fun StudentIdCardDialog(
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             MadrasaRoundLogo(
                                 logoPath = madrasaInfo.logoPath,
+                                logoVersion = logoVersion,
                                 size = 50.dp,
                                 borderWidth = 1.5.dp
                             )

@@ -95,4 +95,65 @@ object RoutineTimeUtil {
         val mins = calculateSlotMinutes(timeSlot)
         return if (mins != null) formatMinutesBengali(mins) else "-"
     }
+
+    private val defaultClassOrder = listOf(
+        "সকল শ্রেণী (সম্মিলিত)",
+        "সকল শ্রেণী",
+        "নূরানী - শিশু",
+        "নূরানী - প্রথম",
+        "নূরানী - দ্বিতীয়",
+        "নূরানী - তৃতীয়",
+        "নাজেরা",
+        "হিফজ",
+        "কিতাব বিভাগ"
+    )
+
+    fun classSortRank(className: String): Int {
+        val clean = className.trim()
+        val idx = defaultClassOrder.indexOfFirst { it.equals(clean, ignoreCase = true) }
+        return if (idx >= 0) idx else 100
+    }
+
+    fun parseStartMinutes(timeSlot: String): Int {
+        val normalized = toAsciiDigits(timeSlot)
+        val match = Regex("""(\d{1,2})\s*[:.]\s*(\d{2})""").find(normalized) ?: return Int.MAX_VALUE
+        var h = match.groupValues[1].toIntOrNull() ?: return Int.MAX_VALUE
+        val m = match.groupValues[2].toIntOrNull() ?: return Int.MAX_VALUE
+        if (h !in 0..23 || m !in 0..59) return Int.MAX_VALUE
+        val lower = normalized.lowercase()
+        val isExplicitAm = lower.contains("am") || lower.contains("সকাল") || lower.contains("ভোর")
+        val isExplicitPm = lower.contains("pm") || lower.contains("দুপুর") || lower.contains("বিকাল") || lower.contains("সন্ধ্যা")
+        if (isExplicitPm && h in 1..11) {
+            h += 12
+        } else if (!isExplicitAm && h in 1..5) {
+            h += 12
+        }
+        return h * 60 + m
+    }
+
+    fun sortRoutinesByClassAndSerial(
+        routines: List<com.example.data.entity.ClassRoutineEntity>
+    ): List<com.example.data.entity.ClassRoutineEntity> {
+        return routines.sortedWith(
+            compareBy<com.example.data.entity.ClassRoutineEntity>(
+                { classSortRank(it.className) },
+                { it.className.trim() },
+                { if (it.serialOrder > 0) it.serialOrder else Int.MAX_VALUE },
+                { parseStartMinutes(it.timeSlot) },
+                { it.id }
+            )
+        )
+    }
+
+    fun sortSingleClassBySerial(
+        routines: List<com.example.data.entity.ClassRoutineEntity>
+    ): List<com.example.data.entity.ClassRoutineEntity> {
+        return routines.sortedWith(
+            compareBy<com.example.data.entity.ClassRoutineEntity>(
+                { if (it.serialOrder > 0) it.serialOrder else Int.MAX_VALUE },
+                { parseStartMinutes(it.timeSlot) },
+                { it.id }
+            )
+        )
+    }
 }

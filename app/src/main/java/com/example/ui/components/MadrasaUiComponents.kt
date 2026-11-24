@@ -46,6 +46,7 @@ import com.example.ui.theme.MadrasaPrimaryDark
 import com.example.ui.theme.MadrasaRed
 import com.example.ui.theme.MadrasaSky
 import com.example.ui.theme.MadrasaTeal
+import com.example.util.MadrasaLogoUtil
 import androidx.compose.foundation.clickable
 import java.io.File
 import kotlin.math.cos
@@ -56,6 +57,7 @@ fun MadrasaRoundLogo(
     logoPath: String,
     size: Dp,
     modifier: Modifier = Modifier,
+    logoVersion: Long = 0L,
     borderWidth: Dp = 1.5.dp,
     borderColor: Color = MadrasaGold.copy(alpha = 0.85f),
     showBorder: Boolean = true,
@@ -65,7 +67,7 @@ fun MadrasaRoundLogo(
     contentDescription: String = "মাদ্রাসা লোগো"
 ) {
     val context = LocalContext.current
-    val hasValidCustomLogo = remember(logoPath) {
+    val hasValidCustomLogo = remember(logoPath, logoVersion) {
         if (logoPath.isBlank()) {
             false
         } else {
@@ -84,6 +86,9 @@ fun MadrasaRoundLogo(
     }
 
     val resolvedBg = backgroundColor ?: if (hasValidCustomLogo) Color.White else Color(0xFF0C4437)
+    val cacheKey = remember(logoPath, logoVersion) {
+        MadrasaLogoUtil.computeLogoCacheKey(logoPath, logoVersion)
+    }
 
     Surface(
         shape = CircleShape,
@@ -92,35 +97,39 @@ fun MadrasaRoundLogo(
         shadowElevation = shadowElevation,
         modifier = modifier.size(size)
     ) {
-        val innerPadding = if (showBorder && borderWidth > 0.dp) 1.5.dp else 0.dp
+        val innerPadding = if (showBorder && borderWidth > 0.dp) 2.dp else 0.dp
         val fallbackPainter = painterResource(id = fallbackResId)
-        if (hasValidCustomLogo) {
-            AsyncImage(
-                model = remember(logoPath) {
-                    ImageRequest.Builder(context)
-                        .data(Uri.parse(logoPath))
-                        .crossfade(true)
-                        .build()
-                },
-                placeholder = fallbackPainter,
-                error = fallbackPainter,
-                contentDescription = contentDescription,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding)
-                    .clip(CircleShape)
-            )
-        } else {
-            Image(
-                painter = fallbackPainter,
-                contentDescription = contentDescription,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding)
-                    .clip(CircleShape)
-            )
+        key(logoPath, logoVersion) {
+            if (hasValidCustomLogo) {
+                AsyncImage(
+                    model = remember(logoPath, cacheKey) {
+                        ImageRequest.Builder(context)
+                            .data(Uri.parse(logoPath))
+                            .memoryCacheKey(cacheKey)
+                            .diskCacheKey(cacheKey)
+                            .crossfade(false)
+                            .build()
+                    },
+                    placeholder = fallbackPainter,
+                    error = fallbackPainter,
+                    contentDescription = contentDescription,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(innerPadding)
+                        .clip(CircleShape)
+                )
+            } else {
+                Image(
+                    painter = fallbackPainter,
+                    contentDescription = contentDescription,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(innerPadding)
+                        .clip(CircleShape)
+                )
+            }
         }
     }
 }
@@ -254,6 +263,8 @@ fun SubScreenTopBar(
     title: String,
     subtitle: String? = null,
     logoPath: String = "",
+    logoVersion: Long = 0L,
+    screenIcon: ImageVector? = null,
     onBack: () -> Unit
 ) {
     Surface(
@@ -298,13 +309,32 @@ fun SubScreenTopBar(
                         }
                     }
 
-                    Spacer(modifier = Modifier.width(6.dp))
+                    if (screenIcon != null) {
+                        Surface(
+                            shape = CircleShape,
+                            color = MadrasaGold.copy(alpha = 0.2f),
+                            border = BorderStroke(1.dp, MadrasaGold.copy(alpha = 0.55f)),
+                            modifier = Modifier.size(34.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = screenIcon,
+                                    contentDescription = null,
+                                    tint = MadrasaGold,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                    } else {
+                        Spacer(modifier = Modifier.width(6.dp))
+                    }
 
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = title,
                             color = Color.White,
-                            fontSize = 17.5.sp,
+                            fontSize = 17.sp,
                             fontWeight = FontWeight.Bold,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
@@ -325,9 +355,12 @@ fun SubScreenTopBar(
 
                     MadrasaRoundLogo(
                         logoPath = logoPath,
-                        size = 38.dp,
+                        logoVersion = logoVersion,
+                        size = 48.dp,
                         borderWidth = 1.5.dp,
-                        modifier = Modifier.padding(end = 6.dp)
+                        modifier = Modifier
+                            .padding(end = 6.dp)
+                            .testTag("subscreen_madrasa_logo")
                     )
                 }
 

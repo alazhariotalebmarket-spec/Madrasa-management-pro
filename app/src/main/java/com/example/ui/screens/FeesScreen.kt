@@ -49,6 +49,7 @@ fun FeesScreen(
     students: List<StudentEntity>,
     fees: List<FeeEntity>,
     madrasaInfo: MadrasaInfo = MadrasaInfo(),
+    logoVersion: Long = 0L,
     onAddFee: (Int, Double, String, String) -> Unit,
     onDeleteFee: (Int) -> Unit
 ) {
@@ -559,6 +560,7 @@ fun FeesScreen(
                     ) {
                         MadrasaRoundLogo(
                             logoPath = madrasaInfo.logoPath,
+                            logoVersion = logoVersion,
                             size = 52.dp,
                             borderWidth = 1.5.dp
                         )

@@ -174,7 +174,7 @@ interface QuestionPaperDao {
 
 @Dao
 interface ClassRoutineDao {
-    @Query("SELECT * FROM class_routines ORDER BY id ASC")
+    @Query("SELECT * FROM class_routines ORDER BY className ASC, serialOrder ASC, id ASC")
     fun getAllClassRoutines(): Flow<List<ClassRoutineEntity>>
 
     @Query("SELECT * FROM class_routines")

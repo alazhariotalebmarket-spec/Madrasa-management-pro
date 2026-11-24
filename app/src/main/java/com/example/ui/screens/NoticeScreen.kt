@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.example.data.MadrasaInfo
 import com.example.data.entity.NoticeEntity
 import com.example.ui.components.MadrasaEmptyState
 import com.example.ui.components.ThreeDotDeleteMenu
@@ -42,6 +43,8 @@ import kotlinx.coroutines.withContext
 @Composable
 fun NoticeScreen(
     notices: List<NoticeEntity>,
+    madrasaInfo: MadrasaInfo = MadrasaInfo(),
+    logoVersion: Long = 0L,
     onAddNotice: (String, String) -> Unit,
     onDeleteNotice: (Int) -> Unit
 ) {
@@ -240,10 +243,10 @@ fun NoticeScreen(
 
     // High-Resolution Photo Preview Dialog
     previewNotice?.let { n ->
-        var posterBitmap by remember(n.id, n.title, n.description, n.date) {
+        var posterBitmap by remember(n.id, n.title, n.description, n.date, madrasaInfo.logoPath, madrasaInfo.name, logoVersion) {
             mutableStateOf<Bitmap?>(null)
         }
-        LaunchedEffect(n.id, n.title, n.description, n.date) {
+        LaunchedEffect(n.id, n.title, n.description, n.date, madrasaInfo.logoPath, madrasaInfo.name, logoVersion) {
             posterBitmap = withContext(Dispatchers.Default) {
                 NoticeImageUtil.createNoticePosterBitmap(context, n)
             }

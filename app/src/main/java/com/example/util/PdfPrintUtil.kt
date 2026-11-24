@@ -39,9 +39,6 @@ data class MeritPdfEntry(
 
 object PdfPrintUtil {
 
-    private const val MADRASA_NAME = "ইসহাকিয়া কেরাতুল কোরআন নূরানী ও হাফেজিয়া মাদ্রাসা"
-    private const val MADRASA_ADDRESS = "পশ্চিম তুষখালী, ছোটবিঘাই, পটুয়াখালী সদর, পটুয়াখালী"
-    private const val MADRASA_PHONE = "+8801726541607"
     private const val DEVELOPER_FOOTER = "প্রস্তুতকারী: মোঃ ফেরদাউস মোল্লা (+8801934411199)"
 
     // Standard A4 (210mm x 297mm) at 72 DPI = 595 x 842 pt
@@ -224,12 +221,46 @@ object PdfPrintUtil {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             StaticLayout.Builder.obtain(text, 0, text.length, paint, safeW)
                 .setAlignment(alignment)
+                .setBreakStrategy(Layout.BREAK_STRATEGY_SIMPLE)
+                .setHyphenationFrequency(Layout.HYPHENATION_FREQUENCY_NONE)
                 .setLineSpacing(lineSpacingAdd, lineSpacingMult)
                 .build()
         } else {
             @Suppress("DEPRECATION")
             StaticLayout(text, paint, safeW, alignment, lineSpacingMult, lineSpacingAdd, false)
         }
+    }
+
+    /**
+     * Builds a StaticLayout guaranteed to fit inside [widthPx] without horizontally clipping
+     * long unbroken words by stepping down text size cleanly when needed.
+     */
+    private fun makeFittedStaticLayout(
+        text: CharSequence,
+        basePaint: TextPaint,
+        widthPx: Int,
+        alignment: Layout.Alignment = Layout.Alignment.ALIGN_NORMAL,
+        lineSpacingMult: Float = 1.15f,
+        lineSpacingAdd: Float = 1.5f,
+        minTextSize: Float = 7.0f
+    ): StaticLayout {
+        val safeW = widthPx.coerceAtLeast(24)
+        var size = basePaint.textSize
+        while (size > minTextSize) {
+            val testPaint = TextPaint(basePaint).apply { textSize = size }
+            val layout = makeStaticLayout(text, testPaint, safeW, alignment, lineSpacingMult, lineSpacingAdd)
+            var maxLineW = 0f
+            for (i in 0 until layout.lineCount) {
+                val lw = layout.getLineWidth(i)
+                if (lw > maxLineW) maxLineW = lw
+            }
+            if (maxLineW <= safeW + 0.5f) {
+                return layout
+            }
+            size -= 0.6f
+        }
+        val minPaint = TextPaint(basePaint).apply { textSize = minTextSize }
+        return makeStaticLayout(text, minPaint, safeW, alignment, lineSpacingMult, lineSpacingAdd)
     }
 
     private fun Canvas.drawLayoutAt(layout: StaticLayout, x: Float, y: Float) {
@@ -345,13 +376,20 @@ object PdfPrintUtil {
             canvas.drawLayoutAt(addrLayout, headerTextStart, ty)
             ty += addrLayout.height + 4f
 
-            val phonePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            val phonePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = 0xFFD4AF37.toInt()
                 textSize = 9.5f
                 typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-                textAlign = Paint.Align.CENTER
             }
-            canvas.drawText("মোবাইল: ${madrasaInfo.phone}", headerTextStart + headerTextW / 2f, ty + 9f, phonePaint)
+            val phoneLayout = makeFittedStaticLayout(
+                "মোবাইল: ${madrasaInfo.phone}",
+                phonePaint,
+                headerTextW,
+                Layout.Alignment.ALIGN_CENTER,
+                1.05f,
+                0f
+            )
+            canvas.drawLayoutAt(phoneLayout, headerTextStart, ty)
 
             // Gold Subtitle Ribbon (Wrapped)
             val ribbonPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -458,9 +496,17 @@ object PdfPrintUtil {
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
         }
         val layouts = cols.map { col ->
-            makeStaticLayout(col.title, thPaint, (col.width - 10f).toInt().coerceAtLeast(16), col.alignment, 1.05f, 0f)
+            makeFittedStaticLayout(
+                col.title,
+                thPaint,
+                (col.width - 10f).toInt().coerceAtLeast(20),
+                col.alignment,
+                1.08f,
+                0f,
+                minTextSize = 7.2f
+            )
         }
-        val rowH = maxOf(28f, (layouts.maxOfOrNull { it.height } ?: 14) + 12f)
+        val rowH = maxOf(28f, (layouts.maxOfOrNull { it.height } ?: 14) + 14f)
         cursor.ensureSpace(rowH)
 
         val top = cursor.y
@@ -486,7 +532,7 @@ object PdfPrintUtil {
             val l = layouts[idx]
             val drawY = top + (rowH - l.height) / 2f
             cursor.canvas.save()
-            cursor.canvas.clipRect(x + 1f, top + 0.5f, x + col.width - 1f, top + rowH - 0.5f)
+            cursor.canvas.clipRect(x + 0.5f, top + 0.5f, x + col.width - 0.5f, top + rowH - 0.5f)
             cursor.canvas.drawLayoutAt(l, x + 5f, drawY)
             cursor.canvas.restore()
             x += col.width
@@ -509,13 +555,21 @@ object PdfPrintUtil {
         val layouts = cols.mapIndexed { idx, col ->
             val tp = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = textColors.getOrNull(idx) ?: 0xFF1F2937.toInt()
-                textSize = 9.8f
+                textSize = 9.5f
                 if (boldCols.contains(idx)) typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             }
-            makeStaticLayout(values.getOrElse(idx) { "" }, tp, (col.width - 10f).toInt().coerceAtLeast(16), col.alignment, 1.12f, 1f)
+            makeFittedStaticLayout(
+                values.getOrElse(idx) { "" },
+                tp,
+                (col.width - 10f).toInt().coerceAtLeast(20),
+                col.alignment,
+                1.15f,
+                1.5f,
+                minTextSize = 6.8f
+            )
         }
 
-        val rowH = maxOf(24f, (layouts.maxOfOrNull { it.height } ?: 14) + 12f)
+        val rowH = maxOf(26f, (layouts.maxOfOrNull { it.height } ?: 14) + 14f)
         cursor.ensureSpace(rowH) {
             if (repeatHeader) {
                 drawTableHeader(cursor, cols, showCellBorders = showHeaderCellBorders)
@@ -541,7 +595,7 @@ object PdfPrintUtil {
             val l = layouts[idx]
             val drawY = top + (rowH - l.height) / 2f
             cursor.canvas.save()
-            cursor.canvas.clipRect(x + 1f, top + 0.5f, x + col.width - 1f, top + rowH - 0.5f)
+            cursor.canvas.clipRect(x + 0.5f, top + 0.5f, x + col.width - 0.5f, top + rowH - 0.5f)
             cursor.canvas.drawLayoutAt(l, x + 5f, drawY)
             cursor.canvas.restore()
             x += col.width
@@ -1941,16 +1995,16 @@ object PdfPrintUtil {
             textSize = 10.5f
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
         }
-        val layout = makeStaticLayout(
+        val layout = makeFittedStaticLayout(
             bannerText,
             textPaint,
             (CONTENT_W - 16f).toInt().coerceAtLeast(24),
             Layout.Alignment.ALIGN_NORMAL,
             1.15f,
-            1f
+            1.5f
         )
-        val boxH = maxOf(26f, layout.height + 12f)
-        cursor.ensureSpace(boxH + 56f)
+        val boxH = maxOf(26f, layout.height + 14f)
+        cursor.ensureSpace(boxH + 92f)
 
         val top = cursor.y
         cursor.canvas.drawRect(LEFT, top, RIGHT, top + boxH, Paint().apply { color = 0xFFEAF7EF.toInt() })
@@ -1969,22 +2023,35 @@ object PdfPrintUtil {
     fun generateAndShareClassRoutinePdf(
         context: Context,
         classFilterTitle: String,
-        routines: List<ClassRoutineEntity>
+        routines: List<ClassRoutineEntity>,
+        combinedMasterMode: Boolean = false
     ) = runAsyncExport(context, "বাৎসরিক ক্লাস রুটিন PDF তৈরি হচ্ছে...", "রুটিন তৈরিতে ত্রুটি") { appContext ->
         val doc = PdfDocument()
         try {
-            val cursor = A4PageCursor(appContext, doc, "বাৎসরিক ক্লাস রুটিন • $classFilterTitle")
+            val modeLabel = if (combinedMasterMode) "সব শ্রেণী একসাথে (মাস্টার রুটিন)" else classFilterTitle
+            val cursor = A4PageCursor(appContext, doc, "বাৎসরিক ক্লাস রুটিন • $modeLabel")
 
-            // Exact boxed columns summing to CONTENT_W (527f); wider boxes for বিষয় & শিক্ষকের নাম
-            val cols = listOf(
-                TableCol("নং", 36f, Layout.Alignment.ALIGN_CENTER),
-                TableCol("সময়", 98f, Layout.Alignment.ALIGN_CENTER),
-                TableCol("বিষয়", 163f, Layout.Alignment.ALIGN_NORMAL),
-                TableCol("শিক্ষকের নাম", 156f, Layout.Alignment.ALIGN_NORMAL),
-                TableCol("মোট সময়", 74f, Layout.Alignment.ALIGN_CENTER)
+            // Exact boxed columns strictly summing to CONTENT_W (527f)
+            val classWiseCols = listOf(
+                TableCol("সিরিয়াল", 44f, Layout.Alignment.ALIGN_CENTER),
+                TableCol("সময়", 100f, Layout.Alignment.ALIGN_CENTER),
+                TableCol("বিষয় / কিতাব", 158f, Layout.Alignment.ALIGN_NORMAL),
+                TableCol("শিক্ষকের নাম", 145f, Layout.Alignment.ALIGN_NORMAL),
+                TableCol("মোট সময়", 80f, Layout.Alignment.ALIGN_CENTER)
+            )
+            val masterCols = listOf(
+                TableCol("নং", 34f, Layout.Alignment.ALIGN_CENTER),
+                TableCol("শ্রেণী / জামাত", 95f, Layout.Alignment.ALIGN_NORMAL),
+                TableCol("সময়", 88f, Layout.Alignment.ALIGN_CENTER),
+                TableCol("বিষয় / কিতাব", 130f, Layout.Alignment.ALIGN_NORMAL),
+                TableCol("শিক্ষকের নাম", 115f, Layout.Alignment.ALIGN_NORMAL),
+                TableCol("মোট সময়", 65f, Layout.Alignment.ALIGN_CENTER)
             )
 
-            if (routines.isEmpty()) {
+            val sortedRoutines = RoutineTimeUtil.sortRoutinesByClassAndSerial(routines)
+
+            if (sortedRoutines.isEmpty()) {
+                val cols = if (combinedMasterMode) masterCols else classWiseCols
                 drawTableHeader(cursor, cols, showCellBorders = true)
                 drawWrappedTableRow(
                     cursor = cursor,
@@ -1995,7 +2062,7 @@ object PdfPrintUtil {
                     showHeaderCellBorders = true
                 )
             } else {
-                val grandMinutes = routines.sumOf { r ->
+                val grandMinutes = sortedRoutines.sumOf { r ->
                     RoutineTimeUtil.parseDurationLabelMinutes(r.duration, r.timeSlot)
                 }
                 val grandDurationLabel = if (grandMinutes > 0) RoutineTimeUtil.formatMinutesBengali(grandMinutes) else "-"
@@ -2003,19 +2070,19 @@ object PdfPrintUtil {
                 // Top summary bar
                 val summaryPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
                     color = 0xFF1E293B.toInt()
-                    textSize = 9.8f
+                    textSize = 9.5f
                     typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
                 }
-                val summaryText = "শ্রেণী ফিল্টার: $classFilterTitle   •   মোট ক্লাস: ${RoutineTimeUtil.toBengaliDigits(routines.size)} টি   •   মোট পাঠদান সময়: $grandDurationLabel"
-                val summaryLayout = makeStaticLayout(
+                val summaryText = "শ্রেণী: $modeLabel   •   মোট ক্লাস: ${RoutineTimeUtil.toBengaliDigits(sortedRoutines.size)} টি   •   মোট পাঠদান সময়: $grandDurationLabel"
+                val summaryLayout = makeFittedStaticLayout(
                     summaryText,
                     summaryPaint,
                     (CONTENT_W - 16f).toInt(),
                     Layout.Alignment.ALIGN_CENTER,
                     1.15f,
-                    1f
+                    1.5f
                 )
-                val summaryH = maxOf(24f, summaryLayout.height + 10f)
+                val summaryH = maxOf(24f, summaryLayout.height + 12f)
                 cursor.ensureSpace(summaryH + 8f)
                 val sTop = cursor.y
                 cursor.canvas.drawRoundRect(LEFT, sTop, RIGHT, sTop + summaryH, 5f, 5f, Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -2032,28 +2099,19 @@ object PdfPrintUtil {
                 cursor.canvas.restore()
                 cursor.y += summaryH + 10f
 
-                val groupedByClass = routines.groupBy { it.className.ifBlank { "সাধারণ শ্রেণী" } }
-                groupedByClass.forEach { (clsName, classList) ->
-                    val sessionLabels = classList.map { it.dayOfWeek.trim() }
-                        .filter { it.isNotBlank() }
-                        .distinct()
-                        .joinToString(", ")
-                    val sectionLabel = buildString {
-                        append("শ্রেণী / জামাত: $clsName")
-                        if (sessionLabels.isNotBlank()) append("  •  সময়কাল: $sessionLabels")
-                        append("  •  ক্লাস সংখ্যা: ${RoutineTimeUtil.toBengaliDigits(classList.size)} টি")
-                    }
-
-                    drawRoutineSectionBanner(cursor, sectionLabel)
-                    drawTableHeader(cursor, cols, showCellBorders = true)
-
-                    classList.forEachIndexed { idx, r ->
+                if (combinedMasterMode) {
+                    drawTableHeader(cursor, masterCols, showCellBorders = true)
+                    sortedRoutines.forEachIndexed { idx, r ->
                         val resolvedDuration = RoutineTimeUtil.resolveDurationDisplay(r.duration, r.timeSlot)
+                        val serialText = RoutineTimeUtil.toBengaliDigits(
+                            if (r.serialOrder > 0) r.serialOrder else (idx + 1)
+                        )
                         drawWrappedTableRow(
                             cursor = cursor,
-                            cols = cols,
+                            cols = masterCols,
                             values = listOf(
-                                RoutineTimeUtil.toBengaliDigits(idx + 1),
+                                serialText,
+                                r.className.ifBlank { "-" },
                                 r.timeSlot.ifBlank { "-" },
                                 r.subject.ifBlank { "-" },
                                 r.teacherName.ifBlank { "-" },
@@ -2061,58 +2119,132 @@ object PdfPrintUtil {
                             ),
                             textColors = listOf(
                                 0xFF0A5C36.toInt(),
+                                0xFF0C5B6E.toInt(),
                                 0xFF0F172A.toInt(),
                                 0xFF064E3B.toInt(),
                                 0xFF1E293B.toInt(),
                                 0xFF0F766E.toInt()
                             ),
-                            boldCols = setOf(0, 2, 4),
+                            boldCols = setOf(0, 1, 3, 5),
                             isEvenRow = idx % 2 == 0,
                             repeatHeader = true,
                             showHeaderCellBorders = true
                         )
                     }
-
-                    val classMinutes = classList.sumOf { r ->
-                        RoutineTimeUtil.parseDurationLabelMinutes(r.duration, r.timeSlot)
-                    }
-                    val classDurationLabel = if (classMinutes > 0) RoutineTimeUtil.formatMinutesBengali(classMinutes) else "-"
                     drawWrappedTableRow(
                         cursor = cursor,
-                        cols = cols,
+                        cols = masterCols,
                         values = listOf(
                             "মোট",
-                            "${RoutineTimeUtil.toBengaliDigits(classList.size)} টি পিরিয়ড",
-                            "বাৎসরিক নির্ধারিত পাঠদান সময়",
+                            "সব শ্রেণী",
+                            "${RoutineTimeUtil.toBengaliDigits(sortedRoutines.size)} পিরিয়ড",
+                            "সমন্বিত বাৎসরিক পাঠদান",
                             "-",
-                            classDurationLabel
+                            grandDurationLabel
                         ),
                         textColors = listOf(
+                            0xFF063D23.toInt(),
                             0xFF063D23.toInt(),
                             0xFF063D23.toInt(),
                             0xFF063D23.toInt(),
                             0xFF64748B.toInt(),
                             0xFF063D23.toInt()
                         ),
-                        boldCols = setOf(0, 1, 2, 4),
+                        boldCols = setOf(0, 1, 2, 3, 5),
                         isEvenRow = false,
                         repeatHeader = false,
                         showHeaderCellBorders = true,
                         rowBgOverride = 0xFFEAF7EF.toInt(),
                         borderColorOverride = 0xFF0A5C36.toInt()
                     )
+                } else {
+                    val groupedByClass = sortedRoutines.groupBy { it.className.ifBlank { "সাধারণ শ্রেণী" } }
+                    groupedByClass.forEach { (clsName, rawClassList) ->
+                        val classList = RoutineTimeUtil.sortSingleClassBySerial(rawClassList)
+                        val sessionLabels = classList.map { it.dayOfWeek.trim() }
+                            .filter { it.isNotBlank() }
+                            .distinct()
+                            .joinToString(", ")
+                        val sectionLabel = buildString {
+                            append("শ্রেণী / জামাত: $clsName")
+                            if (sessionLabels.isNotBlank()) append("  •  সময়কাল: $sessionLabels")
+                            append("  •  ক্লাস সংখ্যা: ${RoutineTimeUtil.toBengaliDigits(classList.size)} টি")
+                        }
 
-                    cursor.y += 12f
+                        drawRoutineSectionBanner(cursor, sectionLabel)
+                        drawTableHeader(cursor, classWiseCols, showCellBorders = true)
+
+                        classList.forEachIndexed { idx, r ->
+                            val resolvedDuration = RoutineTimeUtil.resolveDurationDisplay(r.duration, r.timeSlot)
+                            val serialNo = RoutineTimeUtil.toBengaliDigits(
+                                if (r.serialOrder > 0) r.serialOrder else (idx + 1)
+                            )
+                            drawWrappedTableRow(
+                                cursor = cursor,
+                                cols = classWiseCols,
+                                values = listOf(
+                                    serialNo,
+                                    r.timeSlot.ifBlank { "-" },
+                                    r.subject.ifBlank { "-" },
+                                    r.teacherName.ifBlank { "-" },
+                                    resolvedDuration
+                                ),
+                                textColors = listOf(
+                                    0xFF0A5C36.toInt(),
+                                    0xFF0F172A.toInt(),
+                                    0xFF064E3B.toInt(),
+                                    0xFF1E293B.toInt(),
+                                    0xFF0F766E.toInt()
+                                ),
+                                boldCols = setOf(0, 2, 4),
+                                isEvenRow = idx % 2 == 0,
+                                repeatHeader = true,
+                                showHeaderCellBorders = true
+                            )
+                        }
+
+                        val classMinutes = classList.sumOf { r ->
+                            RoutineTimeUtil.parseDurationLabelMinutes(r.duration, r.timeSlot)
+                        }
+                        val classDurationLabel = if (classMinutes > 0) RoutineTimeUtil.formatMinutesBengali(classMinutes) else "-"
+                        drawWrappedTableRow(
+                            cursor = cursor,
+                            cols = classWiseCols,
+                            values = listOf(
+                                "মোট",
+                                "${RoutineTimeUtil.toBengaliDigits(classList.size)} টি পিরিয়ড",
+                                "বাৎসরিক নির্ধারিত পাঠদান সময়",
+                                "-",
+                                classDurationLabel
+                            ),
+                            textColors = listOf(
+                                0xFF063D23.toInt(),
+                                0xFF063D23.toInt(),
+                                0xFF063D23.toInt(),
+                                0xFF64748B.toInt(),
+                                0xFF063D23.toInt()
+                            ),
+                            boldCols = setOf(0, 1, 2, 4),
+                            isEvenRow = false,
+                            repeatHeader = false,
+                            showHeaderCellBorders = true,
+                            rowBgOverride = 0xFFEAF7EF.toInt(),
+                            borderColorOverride = 0xFF0A5C36.toInt()
+                        )
+
+                        cursor.y += 12f
+                    }
                 }
             }
 
             cursor.drawSignatures("রুটিন প্রস্তুতকারক", "মুহতামিমের সীল ও স্বাক্ষর")
             cursor.finishDocument()
 
-            val pdfFile = File(appContext.cacheDir, "Annual_Class_Routine_${classFilterTitle.replace("\\s+".toRegex(), "_")}.pdf")
+            val safeTitle = modeLabel.replace("[^a-zA-Z0-9_\\-\u0980-\u09FF]+".toRegex(), "_").trim('_').ifBlank { "All" }
+            val pdfFile = File(appContext.cacheDir, "Annual_Class_Routine_$safeTitle.pdf")
             FileOutputStream(pdfFile).use { out -> doc.writeTo(out) }
 
-            shareOrOpenPdf(context, pdfFile, "বাৎসরিক ক্লাস রুটিন - $classFilterTitle")
+            shareOrOpenPdf(context, pdfFile, "বাৎসরিক ক্লাস রুটিন - $modeLabel")
         } finally {
             try { doc.close() } catch (_: Exception) {}
         }
