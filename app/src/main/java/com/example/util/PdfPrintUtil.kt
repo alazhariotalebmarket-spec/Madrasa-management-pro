@@ -696,7 +696,18 @@ object PdfPrintUtil {
             exam2?.getSubjectList()?.forEach { subjectNames.add(it.name) }
             exam3?.getSubjectList()?.forEach { subjectNames.add(it.name) }
             if (subjectNames.isEmpty()) {
-                subjectNames.addAll(listOf("কুরআন", "আরবি", "বাংলা", "গণিত", "ইংরেজি"))
+                subjectNames.addAll(
+                    listOf(
+                        "আরবী লিখিত",
+                        "আরবী মৌখিক",
+                        "বাংলা",
+                        "ইংরেজি",
+                        "অংক",
+                        "সাধারণ জ্ঞান",
+                        "আকাঈদ ও ফিকাহ",
+                        "দোয়া ও হাদিস"
+                    )
+                )
             }
 
             // Total width = 527f

@@ -13,6 +13,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.PictureAsPdf
@@ -61,17 +62,31 @@ import com.example.util.EXAM_MONTHLY
 import com.example.util.EXAM_SECOND_TERM
 import com.example.util.PdfPrintUtil
 
+internal val RESULT_SUBJECT_OPTIONS = listOf(
+    "আরবী লিখিত",
+    "আরবী মৌখিক",
+    "বাংলা",
+    "ইংরেজি",
+    "অংক",
+    "সাধারণ জ্ঞান",
+    "আকাঈদ ও ফিকাহ",
+    "দোয়া ও হাদিস"
+)
+
 private data class EditableSubjectRow(
     val name: String,
     val mark: String
 )
 
 private fun defaultSubjectRows(): List<EditableSubjectRow> = listOf(
-    EditableSubjectRow("কুরআন", "80"),
-    EditableSubjectRow("আরবি", "75"),
-    EditableSubjectRow("বাংলা", "70"),
-    EditableSubjectRow("গণিত", "85"),
-    EditableSubjectRow("ইংরেজি", "78")
+    EditableSubjectRow(RESULT_SUBJECT_OPTIONS[0], "80"),
+    EditableSubjectRow(RESULT_SUBJECT_OPTIONS[1], "75"),
+    EditableSubjectRow(RESULT_SUBJECT_OPTIONS[2], "70"),
+    EditableSubjectRow(RESULT_SUBJECT_OPTIONS[3], "78"),
+    EditableSubjectRow(RESULT_SUBJECT_OPTIONS[4], "85"),
+    EditableSubjectRow(RESULT_SUBJECT_OPTIONS[5], "75"),
+    EditableSubjectRow(RESULT_SUBJECT_OPTIONS[6], "80"),
+    EditableSubjectRow(RESULT_SUBJECT_OPTIONS[7], "85")
 )
 
 fun calculateRankBengali(rankNum: Int): String {
@@ -127,6 +142,7 @@ fun ResultsScreen(
 
     var expandedStudent by remember { mutableStateOf(false) }
     var expandedExam by remember { mutableStateOf(false) }
+    var expandedSubjectIndex by remember { mutableStateOf<Int?>(null) }
 
     var activeResultId by remember { mutableStateOf<Int?>(null) }
     var activeCombinedStudentId by remember { mutableStateOf<Int?>(null) }
@@ -226,6 +242,7 @@ fun ResultsScreen(
     fun resetForm() {
         editingResultId = null
         editingResultDate = null
+        expandedSubjectIndex = null
         subjectRows.clear()
         subjectRows.addAll(defaultSubjectRows())
     }
@@ -512,7 +529,7 @@ fun ResultsScreen(
                         }
                     } else {
                         Text(
-                            text = "বিষয় ও নম্বরসমূহ (এডিটেবল • পাশ মার্ক ৩৩):",
+                            text = "বিষয় ও নম্বরসমূহ (ড্রপডাউন থেকে পরিবর্তনযোগ্য • পাশ মার্ক ৩৩):",
                             fontSize = 13.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = MadrasaPrimary
@@ -520,6 +537,7 @@ fun ResultsScreen(
                         Spacer(modifier = Modifier.height(4.dp))
 
                         subjectRows.forEachIndexed { index, row ->
+                            val isSubjectExpanded = expandedSubjectIndex == index
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -527,18 +545,64 @@ fun ResultsScreen(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                OutlinedTextField(
-                                    value = row.name,
-                                    onValueChange = { newName ->
-                                        subjectRows[index] = row.copy(name = newName)
+                                ExposedDropdownMenuBox(
+                                    expanded = isSubjectExpanded,
+                                    onExpandedChange = {
+                                        expandedSubjectIndex = if (isSubjectExpanded) null else index
                                     },
-                                    label = { Text("বিষয় ${index + 1}") },
-                                    singleLine = true,
                                     modifier = Modifier
-                                        .weight(1f)
-                                        .testTag("subject_name_$index"),
-                                    shape = RoundedCornerShape(8.dp)
-                                )
+                                        .weight(1.35f)
+                                        .testTag("subject_dropdown_$index")
+                                ) {
+                                    OutlinedTextField(
+                                        value = row.name,
+                                        onValueChange = {},
+                                        readOnly = true,
+                                        label = { Text("বিষয় ${index + 1}") },
+                                        singleLine = true,
+                                        textStyle = LocalTextStyle.current.copy(fontSize = 13.5.sp),
+                                        trailingIcon = {
+                                            ExposedDropdownMenuDefaults.TrailingIcon(expanded = isSubjectExpanded)
+                                        },
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .menuAnchor(MenuAnchorType.PrimaryNotEditable, enabled = true)
+                                            .testTag("subject_name_$index"),
+                                        shape = RoundedCornerShape(8.dp)
+                                    )
+                                    ExposedDropdownMenu(
+                                        expanded = isSubjectExpanded,
+                                        onDismissRequest = { expandedSubjectIndex = null }
+                                    ) {
+                                        RESULT_SUBJECT_OPTIONS.forEachIndexed { optionIndex, subjectOption ->
+                                            val isSelected = row.name == subjectOption
+                                            DropdownMenuItem(
+                                                text = {
+                                                    Text(
+                                                        text = subjectOption,
+                                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                                        color = if (isSelected) MadrasaPrimary else TextDark
+                                                    )
+                                                },
+                                                trailingIcon = if (isSelected) {
+                                                    {
+                                                        Icon(
+                                                            imageVector = Icons.Default.Check,
+                                                            contentDescription = null,
+                                                            tint = MadrasaPrimary,
+                                                            modifier = Modifier.size(18.dp)
+                                                        )
+                                                    }
+                                                } else null,
+                                                onClick = {
+                                                    subjectRows[index] = row.copy(name = subjectOption)
+                                                    expandedSubjectIndex = null
+                                                },
+                                                modifier = Modifier.testTag("subject_option_${index}_$optionIndex")
+                                            )
+                                        }
+                                    }
+                                }
                                 OutlinedTextField(
                                     value = row.mark,
                                     onValueChange = { newMark ->
@@ -554,7 +618,10 @@ fun ResultsScreen(
                                 )
                                 if (subjectRows.size > 1) {
                                     IconButton(
-                                        onClick = { subjectRows.removeAt(index) },
+                                        onClick = {
+                                            expandedSubjectIndex = null
+                                            subjectRows.removeAt(index)
+                                        },
                                         modifier = Modifier
                                             .size(48.dp)
                                             .testTag("remove_subject_$index")
@@ -572,10 +639,14 @@ fun ResultsScreen(
                         Spacer(modifier = Modifier.height(8.dp))
                         OutlinedButton(
                             onClick = {
-                                subjectRows.add(EditableSubjectRow("বিষয় ${subjectRows.size + 1}", ""))
+                                val nextSubject = RESULT_SUBJECT_OPTIONS.firstOrNull { candidate ->
+                                    subjectRows.none { it.name == candidate }
+                                } ?: RESULT_SUBJECT_OPTIONS[subjectRows.size % RESULT_SUBJECT_OPTIONS.size]
+                                subjectRows.add(EditableSubjectRow(nextSubject, ""))
                             },
                             modifier = Modifier
                                 .fillMaxWidth()
+                                .heightIn(min = 48.dp)
                                 .testTag("add_subject_button"),
                             shape = RoundedCornerShape(8.dp)
                         ) {
